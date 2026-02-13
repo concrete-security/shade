@@ -1,0 +1,157 @@
+services:
+  # Mock app for framework testing
+  app:
+    container_name: mock-app
+    configs:
+      - source: mock_server
+        target: /app/mock_server.py
+        mode: 0444
+      - source: mock_entrypoint
+        target: /app/entrypoint.sh
+        mode: 0744
+    command:
+    entrypoint: /app/entrypoint.sh
+    healthcheck:
+      start_period: 10s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx-cert-manager:
+    image: cert-manager-dev
+    build:
+      context: ./services/cert-manager
+      dockerfile: Dockerfile
+    environment:
+      - DOMAIN=localhost
+      - UPSTREAM_HOST=app
+      - UPSTREAM_PORT=8000
+      - CORS_ORIGINS=["^https?://([^.]+\\.)*concrete-security\\.com(:[0-9]+)?$$","^https?://([^.]+\\.)*vercel\\.app(:[0-9]+)?$$"]
+      - AUTH_ENABLED=false
+      - DEV_MODE=true
+      - EMAIL=test@test.com
+      # Dev-only shared secret for EKM HMAC (CHANGE IN PRODUCTION!)
+      - EKM_SHARED_SECRET=dev-ekm-secret-change-in-production-min-32-chars
+    # Mount dev nginx template that includes debug endpoint
+    volumes:
+      - ./services/cert-manager/nginx_conf/https-dev.conf.tmpl:/app/nginx_conf/https-dev.conf.tmpl:ro
+    configs:
+      - source: acme_test_token_1
+        target: /acme-challenge/.well-known/acme-challenge/test-challenge-token-dev
+        mode: 0644
+      - source: acme_test_token_2
+        target: /acme-challenge/.well-known/acme-challenge/VGVzdENoYWxsZW5nZURldg
+        mode: 0644
+      - source: acme_test_token_3
+        target: /acme-challenge/.well-known/acme-challenge/dev-test-with-hyphens
+        mode: 0644
+
+  attestation-service:
+    image: attestation-service-dev
+    build:
+      context: ./services/attestation-service
+      dockerfile: Dockerfile
+    # Mount debug script to enable debug endpoint in dev
+    volumes:
+      - ./services/attestation-service/attestation_service_with_debug.py:/app/attestation_service_with_debug.py:ro
+    environment:
+      - WORKERS=1
+      # Use debug script in dev mode
+      - SERVICE_SCRIPT=attestation_service_with_debug.py
+      # Dev-only shared secret for EKM HMAC (must match nginx)
+      - EKM_SHARED_SECRET=dev-ekm-secret-change-in-production-min-32-chars
+    deploy:
+      mode: replicated
+      replicas: 1
+
+
+configs:
+  mock_entrypoint:
+    content: |
+      #!/bin/sh
+      pip install fastapi[standard] uvicorn pydantic
+      fastapi run --host 0.0.0.0 --port 8000 /app/mock_server.py
+  mock_server:
+    content: |
+      from fastapi import FastAPI
+      from pydantic import BaseModel
+      from typing import List, Optional, Dict, Any
+      import time
+
+      app = FastAPI()
+
+      class ChatMessage(BaseModel):
+          role: str
+          content: str
+
+      class ChatCompletionRequest(BaseModel):
+          model: str
+          messages: List[ChatMessage]
+          temperature: Optional[float] = 0.7
+          max_tokens: Optional[int] = None
+          stream: Optional[bool] = False
+
+      @app.get('/health')
+      async def health():
+          return {'status': 'ok'}
+
+      @app.get('/echo')
+      async def echo():
+          return {'message': 'echo from mock app'}
+
+      @app.get('/v1/models')
+      async def list_models():
+          return {
+              'object': 'list',
+              'data': [
+                  {
+                      'id': 'mock-model',
+                      'object': 'model',
+                      'created': int(time.time()),
+                      'owned_by': 'mock'
+                  }
+              ]
+          }
+
+      @app.post('/v1/chat/completions')
+      async def chat_completions(request: ChatCompletionRequest):
+          mock_response = 'Mock response: ' + str(request.messages[-1].content if request.messages else 'No message')
+          return {
+              'id': 'chatcmpl-mock-' + str(int(time.time())),
+              'object': 'chat.completion',
+              'created': int(time.time()),
+              'model': request.model,
+              'choices': [
+                  {
+                      'index': 0,
+                      'message': {
+                          'role': 'assistant',
+                          'content': mock_response
+                      },
+                      'finish_reason': 'stop'
+                  }
+              ],
+              'usage': {
+                  'prompt_tokens': 50,
+                  'completion_tokens': 20,
+                  'total_tokens': 70
+              }
+          }
+
+      if __name__ == '__main__':
+          import uvicorn
+          uvicorn.run(app, host='0.0.0.0', port=8000)
+
+  # ACME Challenge test files for development
+  acme_test_token_1:
+    content: |
+      test-challenge-response-content-dev-mode-12345
+
+  acme_test_token_2:
+    content: |
+      base64url-encoded-token-response-content
+
+  acme_test_token_3:
+    content: |
+      hyphenated-token-response-for-testing

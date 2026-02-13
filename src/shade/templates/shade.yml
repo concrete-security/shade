@@ -1,0 +1,43 @@
+# Shade CVM Framework Configuration
+#
+# SHADE PROVIDES:
+#   - TLS 1.3 termination with automatic Let's Encrypt certificates
+#   - aTLS: TDX attestation over TLS (remote attestation)
+#   - EKM channel binding (RFC 9266) for TLS session integrity
+#   - Secure reverse proxy - only nginx is exposed externally
+#
+# YOU ARE RESPONSIBLE FOR:
+#   - Securing your own application endpoints and API auth
+#   - Input validation, rate limiting, DDoS protection
+#   - Any app-specific security beyond TLS + attestation
+
+app:
+  name: my-app
+
+services:
+  my-app:
+    networks: [proxy]
+
+cvm:
+  domain: my-app.example.com
+  routes:
+    - path: /
+      port: 8000
+  # Additional routes:
+  #   - path: /metrics
+  #     port: 8000
+  #     auth_required: true    # requires plugins.auth.enabled
+  #   - path: /admin
+  #     service: admin-panel
+  #     port: 3000
+  # cors:
+  #   origins:
+  #     - '^https?://example\.com$'
+
+# plugins:
+#   auth:
+#     enabled: false
+
+# Secrets: create .env with:
+# EKM_SHARED_SECRET=<min-32-chars>
+# AUTH_SERVICE_TOKEN=<token>  (only if auth plugin enabled)

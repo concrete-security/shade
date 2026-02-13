@@ -1,0 +1,67 @@
+services:
+  # Generic mock app for framework testing
+  app:
+    image: python:3.11-slim
+    container_name: mock-app
+    # No external ports - internal access only
+    expose:
+      - "8000"
+    networks:
+      - proxy
+    restart: unless-stopped
+
+  # Combined Nginx reverse proxy and Certificate Manager
+  nginx-cert-manager:
+    image: ghcr.io/concrete-security/shade-cert-manager@sha256:1af9c4381774484be345eb6bbc6216c8020367e78b06b15c875a7fe5eb63a872
+    container_name: nginx-cert-manager
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=localhost
+      - UPSTREAM_HOST=app
+      - UPSTREAM_PORT=8000
+      - CORS_ORIGINS=[]
+      - AUTH_ENABLED=false
+      - DEV_MODE=false
+      - LETSENCRYPT_STAGING=false
+      - LETSENCRYPT_ACCOUNT_VERSION=v1
+      - FORCE_RM_CERT_FILES=false
+      - LOG_LEVEL=INFO
+      - EKM_SHARED_SECRET=${EKM_SHARED_SECRET}
+    volumes:
+      - tls-certs-keys:/etc/nginx/ssl/
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    networks:
+      - proxy
+      - attestation
+    restart: unless-stopped
+
+  # TDX Attestation service
+  attestation-service:
+    image: ghcr.io/concrete-security/shade-attestation-service@sha256:51e52f431cbae53a50b258733283199fcde983a53531f65067da8ac07b5fb7ad
+    container_name: attestation-service
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8080
+      - WORKERS=8
+      - EKM_SHARED_SECRET=${EKM_SHARED_SECRET}
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    expose:
+      - "8080"
+    networks:
+      - attestation
+    restart: unless-stopped
+    deploy:
+      mode: replicated
+      replicas: 1
+
+networks:
+  proxy:
+    driver: bridge
+  attestation:
+    driver: bridge
+
+volumes:
+  tls-certs-keys:
