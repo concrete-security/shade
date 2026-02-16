@@ -155,7 +155,6 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         f"LETSENCRYPT_ACCOUNT_VERSION={config.cvm.tls.letsencrypt_account_version}",
         "FORCE_RM_CERT_FILES=false",
         "LOG_LEVEL=INFO",
-        "EKM_SHARED_SECRET=${EKM_SHARED_SECRET}",
     ]
 
     # Escape nginx/template variables in fragments (contain $host, ${CORS_HEADERS}, etc.)
@@ -185,7 +184,6 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
             "HOST=0.0.0.0",
             "PORT=8080",
             "WORKERS=8",
-            "EKM_SHARED_SECRET=${EKM_SHARED_SECRET}",
         ],
         "volumes": ["/var/run/dstack.sock:/var/run/dstack.sock"],
         "expose": ["8080"],

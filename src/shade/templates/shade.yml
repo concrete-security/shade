@@ -39,5 +39,4 @@ cvm:
 #     enabled: false
 
 # Secrets: create .env with:
-# EKM_SHARED_SECRET=<min-32-chars>
 # AUTH_SERVICE_TOKEN=<token>  (only if auth plugin enabled)
