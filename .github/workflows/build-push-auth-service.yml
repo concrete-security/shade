@@ -124,8 +124,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-test
     permissions:
-      contents: read
+      contents: write
       packages: write
+      pull-requests: write
     outputs:
       image-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
       image-tag: ${{ steps.meta.outputs.tags }}
@@ -173,6 +174,28 @@ jobs:
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Tags:** \`${{ steps.meta.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Update versions.py digest
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          python .github/scripts/update_versions_digest.py \
+            --service-key auth-service \
+            --image-ref "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
+
+      - name: Open digest update PR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(ci): update auth-service digest"
+          title: "chore(ci): update auth-service digest"
+          body: |
+            Automated digest update for `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`.
+            - Digest: `${{ steps.build.outputs.digest }}`
+            - Run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+          branch: automation/shade-auth-service-digest
+          delete-branch: true
+          labels: ci
 
   provenance:
     needs: [build-and-push]
