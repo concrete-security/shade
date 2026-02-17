@@ -90,6 +90,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 def _get_ekm_hmac_secret() -> str:
     """Derive EKM HMAC key from TEE, falling back to env var for dev/test."""
     try:
@@ -100,13 +101,18 @@ def _get_ekm_hmac_secret() -> str:
         logger.info("EKM HMAC key derived from TEE (dstack)")
         return derived
     except Exception as e:
-        logger.warning(f"dstack key derivation failed ({e}), falling back to EKM_SHARED_SECRET env var")
-        env_secret = os.getenv("EKM_SHARED_SECRET")
-        if env_secret and len(env_secret) >= 32:
-            return env_secret
-        raise RuntimeError(
-            "Cannot derive EKM HMAC key: dstack unavailable and no valid EKM_SHARED_SECRET env var"
+        logger.warning(
+            f"dstack key derivation failed ({e}), falling back to EKM_SHARED_SECRET env var"
         )
+        env_secret = os.getenv("EKM_SHARED_SECRET")
+        if not env_secret:
+            logger.error("EKM_SHARED_SECRET not set - EKM headers will not be validated!")
+            raise RuntimeError("EKM_SHARED_SECRET not set")
+        if len(env_secret) < 32:
+            logger.error("EKM_SHARED_SECRET is too short (minimum 32 characters recommended)")
+            raise RuntimeError("EKM_SHARED_SECRET is too short")
+        logger.info("EKM validation enabled with shared secret")
+        return env_secret
 
 
 EKM_SHARED_SECRET = _get_ekm_hmac_secret()
