@@ -229,4 +229,18 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         if vol_name not in result["volumes"]:
             result["volumes"][vol_name] = vol_def
 
+    # ---- Configs ----
+    user_configs = user_compose.get("configs", {})
+    if user_configs:
+        result["configs"] = {}
+        for cfg_name, cfg_def in user_configs.items():
+            result["configs"][cfg_name] = cfg_def
+
+    # ---- Secrets ----
+    user_secrets = user_compose.get("secrets", {})
+    if user_secrets:
+        result["secrets"] = {}
+        for sec_name, sec_def in user_secrets.items():
+            result["secrets"][sec_name] = sec_def
+
     return result
