@@ -10,8 +10,12 @@ echo "Upstream: ${UPSTREAM_HOST:-<not set>}:${UPSTREAM_PORT:-<not set>}"
 uv run /app/render_nginx_conf.py
 
 # Derive EKM HMAC key from TEE so the operator never sees it.
-# In dev mode with EKM_SHARED_SECRET already set, skip (no dstack socket).
-if [ "${DEV_MODE}" = "true" ] && [ -n "${EKM_SHARED_SECRET}" ]; then
+# In dev mode, use a dummy secret if not provided (no dstack socket locally).
+if [ "${DEV_MODE}" = "true" ]; then
+  if [ -z "${EKM_SHARED_SECRET}" ]; then
+    EKM_SHARED_SECRET="dev-mode-ekm-placeholder-not-for-production"
+    export EKM_SHARED_SECRET
+  fi
   echo "Dev mode: using EKM_SHARED_SECRET from environment."
 else
   echo "Deriving EKM HMAC key from TEE (dstack)..."
