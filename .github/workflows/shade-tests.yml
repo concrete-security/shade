@@ -24,7 +24,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Run unit tests
-        run: uv run pytest tests/ -v
+        run: make unit-tests
 
   integration-tests:
     name: Integration Tests

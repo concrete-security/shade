@@ -36,6 +36,7 @@ help:
 	@echo "  test-certificate  Test SSL certificate validation"
 	@echo "  test-cors         Test CORS configuration on multiple endpoints"
 	@echo "  test-ekm-headers  Test EKM header forwarding (dev mode only)"
+	@echo "  unit-tests        Run unit tests (shade) with coverage reporting"
 	@echo ""
 	@echo "⚙️  Environment Variables:"
 	@echo "  DEV             Set to 'false' for production mode testing"
@@ -93,3 +94,6 @@ test-cors:
 
 test-ekm-headers:
 	$(PYTHON_RUNNER) test_cvm.py $(DEV_FLAG) --ekm-headers --base-url $(NGINX_URL)
+
+unit-tests:
+	$(PYTHON_RUNNER) pytest --cov=shade --cov-report=term-missing --cov-fail-under=98 tests/ -v
