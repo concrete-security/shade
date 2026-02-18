@@ -1,0 +1,61 @@
+name: Shade Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@2ddd2b9cb38ad8efd50337e8ab201519a34c9f24 # v3
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run unit tests
+        run: make unit-tests
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@2ddd2b9cb38ad8efd50337e8ab201519a34c9f24 # v3
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Start services and wait (dev mode)
+        run: |
+          make dev-up
+          make wait-services
+
+      - name: Run integration tests (dev mode)
+        run: make test-all
+
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          echo "=== Service Logs ==="
+          docker compose -f docker-compose.yml -f docker-compose.dev.override.yml logs
+          echo "=== Docker Compose Status ==="
+          docker compose -f docker-compose.yml -f docker-compose.dev.override.yml ps
+
+      - name: Cleanup services
+        if: always()
+        run: make dev-down
