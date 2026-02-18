@@ -68,7 +68,7 @@ jobs:
         run: |
           # Start the container in detached mode
           docker run -d --name attestation-service-test -p 8080:8080 \
-            -e EKM_SHARED_SECRET=test_shared_secret_for_ekm_validation_min_32_chars \
+            -e EKM_SHARED_SECRET=dev-mode-ekm-placeholder-not-for-production \
             attestation-service:test
 
       - name: Install uv
@@ -91,9 +91,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-test
     permissions:
-      contents: write
+      contents: read
       packages: write
-      pull-requests: write
     outputs:
       image-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
       image-tag: ${{ steps.meta.outputs.tags }}
@@ -142,28 +141,6 @@ jobs:
           echo "**Tags:** \`${{ steps.meta.outputs.tags }}\`" >> $GITHUB_STEP_SUMMARY
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
 
-      - name: Update versions.py digest
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          python .github/scripts/update_versions_digest.py \
-            --service-key attestation-service \
-            --image-ref "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
-
-      - name: Open digest update PR
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore(ci): update attestation-service digest"
-          title: "chore(ci): update attestation-service digest"
-          body: |
-            Automated digest update for `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`.
-            - Digest: `${{ steps.build.outputs.digest }}`
-            - Run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-          branch: automation/shade-attestation-service-digest
-          delete-branch: true
-          labels: ci
-
   provenance:
     needs: [build-and-push]
     permissions:
@@ -177,5 +154,39 @@ jobs:
       image: ${{ needs.build-and-push.outputs.image-name }}
       digest: ${{ needs.build-and-push.outputs.image-digest }}
       registry-username: ${{ github.actor }}
+      private-repository: true
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
+
+  update-digest:
+    name: Update Digest References
+    needs: [build-and-push, provenance]
+    if: always() && needs.build-and-push.result == 'success' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Update versions.py and docker-compose.yml digest
+        run: |
+          python .github/scripts/update_versions_digest.py \
+            --service-key attestation-service \
+            --image-ref "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.image-digest }}"
+
+      - name: Open digest update PR
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(ci): update attestation-service digest"
+          title: "chore(ci): update attestation-service digest"
+          body: |
+            Automated digest update for `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`.
+            - Digest: `${{ needs.build-and-push.outputs.image-digest }}`
+            - Run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+          branch: automation/shade-attestation-service-digest
+          delete-branch: true
+          labels: ci
