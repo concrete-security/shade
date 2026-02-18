@@ -12,7 +12,7 @@ services:
 
   # Combined Nginx reverse proxy and Certificate Manager
   nginx-cert-manager:
-    image: ghcr.io/concrete-security/shade-cert-manager@sha256:3ddc9bba61c86dc54884f41fb6b7a192f3ec60b0ff8ef860882006ddac7f22f8
+    image: ghcr.io/concrete-security/shade-cert-manager:sha-08ef573
     container_name: nginx-cert-manager
     ports:
       - "80:80"
@@ -38,7 +38,7 @@ services:
 
   # TDX Attestation service
   attestation-service:
-    image: ghcr.io/concrete-security/shade-attestation-service@sha256:62e4692069e021f1612542e9aefd4e33f390b84a4fab0230ef01aca3e354365b
+    image: ghcr.io/concrete-security/shade-attestation-service:sha-eb5337a
     container_name: attestation-service
     environment:
       - HOST=0.0.0.0

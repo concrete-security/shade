@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Update one image reference in src/shade/versions.py and docker-compose.yml.
 
-This script intentionally updates exactly one service key line in versions.py:
-  "service-key": "ghcr.io/...@sha256:..."
-
-It also updates the matching image line in docker-compose.yml if present.
+This script updates exactly one service key line in versions.py and the
+matching image line in docker-compose.yml.  It accepts any pinned image
+reference (tag-based or digest-based).
 """
 
 from __future__ import annotations
@@ -16,10 +15,10 @@ from pathlib import Path
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Update a Shade image digest in versions.py and docker-compose.yml"
+        description="Update a Shade image ref in versions.py and docker-compose.yml"
     )
     parser.add_argument("--service-key", required=True, help="Service key in VERSIONS map")
-    parser.add_argument("--image-ref", required=True, help="Full image ref with digest")
+    parser.add_argument("--image-ref", required=True, help="Full image ref (tag or digest)")
     parser.add_argument(
         "--versions-file",
         default="src/shade/versions.py",
@@ -39,7 +38,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def update_versions_file(versions_path: Path, service_key: str, image_ref: str) -> bool:
-    """Update the digest in versions.py. Returns True if file was changed."""
+    """Update the image ref in versions.py. Returns True if file was changed."""
     content = versions_path.read_text(encoding="utf-8")
 
     pattern = re.compile(
@@ -72,19 +71,19 @@ def update_versions_file(versions_path: Path, service_key: str, image_ref: str) 
 
 
 def update_compose_file(compose_path: Path, service_key: str, image_ref: str) -> bool:
-    """Update the digest in docker-compose.yml. Returns True if file was changed."""
+    """Update the image ref in docker-compose.yml. Returns True if file was changed."""
     if not compose_path.exists():
         print(f"compose: {compose_path} not found, skipping.")
         return False
 
     content = compose_path.read_text(encoding="utf-8")
 
-    # Extract the image name (without digest) from the new ref
-    image_name = image_ref.split("@")[0]
+    # Extract the image name (without tag or digest)
+    image_name = image_ref.split("@")[0].split(":")[0]
 
-    # Match: image: ghcr.io/concrete-security/shade-<service-key>@sha256:<hex64>
+    # Match image lines with either tag or digest format
     pattern = re.compile(
-        rf"(^\s*image:\s*){re.escape(image_name)}@sha256:[0-9a-f]{{64}}\s*$",
+        rf"(^\s*image:\s*){re.escape(image_name)}(?::[^\s@]+|@sha256:[0-9a-f]{{64}})\s*$",
         re.MULTILINE,
     )
 
@@ -110,8 +109,8 @@ def update_compose_file(compose_path: Path, service_key: str, image_ref: str) ->
 def main() -> int:
     args = parse_args()
     image_ref = args.image_ref.strip()
-    if "@sha256:" not in image_ref:
-        raise SystemExit(f"image ref must be digest-pinned: {image_ref}")
+    if ":" not in image_ref and "@" not in image_ref:
+        raise SystemExit(f"image ref must include a tag or digest: {image_ref}")
 
     update_versions_file(Path(args.versions_file), args.service_key, image_ref)
 

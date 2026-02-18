@@ -103,7 +103,9 @@ jobs:
         with:
           context: ./services/cert-manager
           file: ./services/cert-manager/Dockerfile
-          push: true
+          provenance: false
+          sbom: false
+          outputs: type=image,push=true,oci-mediatypes=false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
@@ -145,21 +147,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
 
-      - name: Update versions.py and docker-compose.yml digest
+      - name: Compute short SHA tag
+        id: short_sha
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Update versions.py and docker-compose.yml image ref
         run: |
           python .github/scripts/update_versions_digest.py \
             --service-key cert-manager \
-            --image-ref "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.image-digest }}"
+            --image-ref "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.short_sha.outputs.tag }}"
 
-      - name: Open digest update PR
+      - name: Open image ref update PR
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore(ci): update cert-manager digest"
-          title: "chore(ci): update cert-manager digest"
+          commit-message: "chore(ci): update cert-manager image tag"
+          title: "chore(ci): update cert-manager image tag"
           body: |
-            Automated digest update for `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`.
-            - Digest: `${{ needs.build-and-push.outputs.image-digest }}`
+            Automated image tag update for `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`.
+            - Tag: `${{ steps.short_sha.outputs.tag }}`
             - Run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
           branch: automation/shade-cert-manager-digest
           delete-branch: true
