@@ -12,7 +12,7 @@ services:
 
   # Combined Nginx reverse proxy and Certificate Manager
   nginx-cert-manager:
-    image: ghcr.io/concrete-security/shade-cert-manager:sha-08ef573
+    image: ghcr.io/concrete-security/shade-cert-manager:sha-b969eac
     container_name: nginx-cert-manager
     ports:
       - "80:80"
