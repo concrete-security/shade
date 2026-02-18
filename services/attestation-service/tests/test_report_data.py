@@ -5,7 +5,6 @@ Tests the compute_report_data function.
 """
 
 import hashlib
-import os
 import sys
 from pathlib import Path
 
@@ -13,8 +12,6 @@ import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-os.environ["EKM_SHARED_SECRET"] = "test_shared_secret_for_ekm_validation_min_32_chars"
 
 from attestation_service import compute_report_data
 

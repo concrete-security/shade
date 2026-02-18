@@ -31,6 +31,8 @@ services:
       - AUTH_ENABLED=false
       - DEV_MODE=true
       - EMAIL=test@test.com
+      # Dev-only shared secret for EKM HMAC (must match attestation-service)
+      - EKM_SHARED_SECRET=dev-mode-ekm-placeholder-not-for-production
     # Mount dev nginx template that includes debug endpoint
     volumes:
       - ./services/cert-manager/nginx_conf/https-dev.conf.tmpl:/app/nginx_conf/https-dev.conf.tmpl:ro
@@ -57,6 +59,8 @@ services:
       - WORKERS=1
       # Use debug script in dev mode
       - SERVICE_SCRIPT=attestation_service_with_debug.py
+      # Dev-only shared secret for EKM HMAC (must match nginx-cert-manager)
+      - EKM_SHARED_SECRET=dev-mode-ekm-placeholder-not-for-production
     deploy:
       mode: replicated
       replicas: 1
