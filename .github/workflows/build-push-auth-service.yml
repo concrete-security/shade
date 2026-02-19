@@ -183,12 +183,13 @@ jobs:
       id-token: write # for creating OIDC tokens for signing.
       packages: write # for uploading attestations.
     # See https://github.com/slsa-framework/slsa-github-generator/issues/358
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
     with:
       image: ${{ needs.build-and-push.outputs.image-name }}
       digest: ${{ needs.build-and-push.outputs.image-digest }}
       registry-username: ${{ github.actor }}
+      # Required for SLSA generator to access private GHCR repos
       private-repository: true
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
@@ -196,7 +197,7 @@ jobs:
   update-digest:
     name: Update Digest References
     needs: [build-and-push, provenance]
-    if: always() && needs.build-and-push.result == 'success' && github.event_name != 'pull_request'
+    if: always() && needs.build-and-push.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -205,6 +206,16 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+
+      - name: Install oras CLI
+        uses: oras-project/setup-oras@v1
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compute short SHA tag
         id: short_sha
@@ -226,6 +237,6 @@ jobs:
             Automated image tag update for `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}`.
             - Tag: `${{ steps.short_sha.outputs.tag }}`
             - Run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
-          branch: automation/shade-auth-service-digest
+          branch: automation/shade-auth-service-digest-${{ steps.short_sha.outputs.tag }}
           delete-branch: true
           labels: ci

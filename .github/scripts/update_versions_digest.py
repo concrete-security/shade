@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -34,7 +36,30 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip updating docker-compose.yml",
     )
+    parser.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip verifying that the image exists in the registry",
+    )
     return parser.parse_args()
+
+
+def verify_image_exists(image_ref: str) -> None:
+    """Verify that the image exists in the registry using oras."""
+    oras = shutil.which("oras")
+    if oras is None:
+        raise SystemExit("oras CLI not found on PATH; install it or pass --no-verify")
+
+    result = subprocess.run(
+        [oras, "manifest", "fetch", "--descriptor", image_ref],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            f"image not found in registry: {image_ref}\n{result.stderr.strip()}"
+        )
+    print(f"verify: image exists in registry: {image_ref}")
 
 
 def update_versions_file(versions_path: Path, service_key: str, image_ref: str) -> bool:
@@ -111,6 +136,9 @@ def main() -> int:
     image_ref = args.image_ref.strip()
     if ":" not in image_ref and "@" not in image_ref:
         raise SystemExit(f"image ref must include a tag or digest: {image_ref}")
+
+    if not args.no_verify:
+        verify_image_exists(image_ref)
 
     update_versions_file(Path(args.versions_file), args.service_key, image_ref)
 
