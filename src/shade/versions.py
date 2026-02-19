@@ -6,9 +6,9 @@ Maps framework versions to container image references.
 # ruff: noqa: E501
 VERSIONS: dict[str, dict[str, str]] = {
     "0.1.0": {
-        "cert-manager": "ghcr.io/concrete-security/shade-cert-manager:sha-08ef573",
-        "attestation-service": "ghcr.io/concrete-security/shade-attestation-service:sha-eb5337a",
-        "auth-service": "ghcr.io/concrete-security/shade-auth-service:sha-a4edb23",
+        "cert-manager": "ghcr.io/concrete-security/shade-cert-manager:sha-b969eac",
+        "attestation-service": "ghcr.io/concrete-security/shade-attestation-service:sha-b969eac",
+        "auth-service": "ghcr.io/concrete-security/shade-auth-service:sha-b969eac",
     },
 }
 
