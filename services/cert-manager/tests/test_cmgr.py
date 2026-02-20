@@ -707,21 +707,39 @@ class TestCertificateManager:
 
     @patch.object(CertificateManager, "generate_deterministic_key")
     @patch.object(CertificateManager, "create_lets_encrypt_cert")
+    @patch.object(CertificateManager, "create_self_signed_cert")
+    @patch.object(CertificateManager, "save_certificate_and_key")
+    @patch.object(CertificateManager, "emit_new_cert_event")
     @patch("time.sleep")
-    def test_create_or_renew_certificate_production_max_retries(
-        self, mock_sleep, mock_create_le, mock_gen_key, temp_dir, mock_private_key
+    def test_create_or_renew_certificate_production_fallback_to_self_signed(
+        self,
+        mock_sleep,
+        mock_emit,
+        mock_save,
+        mock_create_self,
+        mock_create_le,
+        mock_gen_key,
+        temp_dir,
+        mock_private_key,
+        mock_certificate,
     ):
-        """Test certificate creation/renewal with max retries exceeded."""
+        """Test certificate creation falls back to TEE self-signed when LE exhausts retries."""
         mock_gen_key.return_value = mock_private_key
         mock_create_le.side_effect = Exception("Persistent error")
+        mock_create_self.return_value = [mock_certificate]
 
         manager = create_cert_manager(temp_dir, dev_mode=False)
 
-        with pytest.raises(Exception, match="Persistent error"):
-            manager.create_or_renew_certificate()
+        manager.create_or_renew_certificate()
 
         assert mock_create_le.call_count == 4  # Initial + 3 retries
         assert mock_sleep.call_count == 3  # 3 retries
+        mock_create_self.assert_called_once_with(mock_private_key)
+        # Key path should use tee-self-signed prefix
+        calls = mock_gen_key.call_args_list
+        assert calls[-1][0][0] == "cert/tee-self-signed/test.example.com/v1"
+        mock_save.assert_called_once()
+        mock_emit.assert_called_once()
 
 
 # Supervisor Tests
@@ -1143,6 +1161,35 @@ class TestCertificateManagerIntegration:
             assert not (temp_dir / "cert.pem").exists()
             assert not (temp_dir / "key.pem").exists()
             mock_manage.assert_called_once()
+
+    def test_startup_init_production_keeps_self_signed_for_localhost(
+        self, temp_dir, mock_private_key
+    ):
+        """Test startup in production with localhost domain keeps TEE self-signed cert."""
+        manager = CertificateManager(
+            domain="localhost",
+            dev_mode=False,
+            cert_email="test@example.com",
+            letsencrypt_staging=False,
+            letsencrypt_account_version="v1",
+            cert_path=temp_dir,
+            acme_path=temp_dir / "acme",
+        )
+
+        # Save a self-signed certificate (simulating TEE fallback)
+        cert_chain = manager.create_self_signed_cert(mock_private_key)
+        manager.save_certificate_and_key(cert_chain, mock_private_key)
+        assert manager.is_cert_self_signed()
+        assert (temp_dir / "cert.pem").exists()
+
+        with patch.object(manager, "emit_new_cert_event"):
+            with patch.object(manager.supervisor, "setup_nginx_https_config"):
+                with patch.object(manager, "manage_cert_creation_and_renewal"):
+                    manager.startup_init()
+
+                    # Self-signed cert should be KEPT for localhost (TEE fallback)
+                    assert (temp_dir / "cert.pem").exists()
+                    assert (temp_dir / "key.pem").exists()
 
     def test_startup_init_production_deletes_staging_cert_when_disabled(
         self, temp_dir, mock_letsencrypt_staging_cert, mock_private_key

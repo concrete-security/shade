@@ -463,7 +463,7 @@ class CertificateManager:
         # will download it.
         # For now, we assume single instance.
         # See https://aws.amazon.com/about-aws/whats-new/2024/08/amazon-s3-conditional-writes/
-        else:  # Production mode: use Let's Encrypt
+        else:  # Production mode: use Let's Encrypt, fall back to TEE self-signed
             # TODO: maybe add seed into the S3 bucket for more randomness and key rotation on every
             # cert renewal
             private_key = self.generate_deterministic_key(f"cert/letsencrypt/{self.domain}/v1")
@@ -484,8 +484,16 @@ class CertificateManager:
                         i += 1
                         wait_time *= 2
                     else:
-                        logger.error("Max retries reached, giving up.")
-                        raise
+                        logger.warning(
+                            "Let's Encrypt failed after retries. "
+                            "Falling back to self-signed certificate from TEE-derived keys. "
+                            "Clients must verify trust via TDX attestation (aTLS)."
+                        )
+                        private_key = self.generate_deterministic_key(
+                            f"cert/tee-self-signed/{self.domain}/v1"
+                        )
+                        cert_chain = self.create_self_signed_cert(private_key)
+                        success = True
 
             self.save_certificate_and_key(cert_chain, private_key)
 
@@ -524,9 +532,15 @@ class CertificateManager:
         except Exception as e:
             logger.error(f"Failed to force delete certificate files: {e}")
 
-        # If in production (or staging), delete any existing self-signed certificate
+        # If in production with a routable domain, delete any existing self-signed
+        # certificate so Let's Encrypt can replace it. Skip deletion for localhost /
+        # non-routable domains where the TEE self-signed fallback is the expected cert.
         try:
-            if not self.dev_mode and self.is_cert_self_signed():
+            if (
+                not self.dev_mode
+                and self.is_cert_self_signed()
+                and self.domain not in ("localhost", "127.0.0.1")
+            ):
                 logger.info("Found self-signed certificate in production mode, deleting it")
                 self.delete_certificate_files()
         except Exception as e:
