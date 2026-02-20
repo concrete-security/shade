@@ -124,14 +124,12 @@ jobs:
       id-token: write # for creating OIDC tokens for signing.
       packages: write # for uploading attestations.
     # See https://github.com/slsa-framework/slsa-github-generator/issues/358
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ github.event_name != 'pull_request' }}
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.1.0
     with:
       image: ${{ needs.build-and-push.outputs.image-name }}
       digest: ${{ needs.build-and-push.outputs.image-digest }}
       registry-username: ${{ github.actor }}
-      # Required for SLSA generator to access private GHCR repos
-      private-repository: true
     secrets:
       registry-password: ${{ secrets.GITHUB_TOKEN }}
 
@@ -148,8 +146,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
 
-      - name: Install oras CLI
-        uses: oras-project/setup-oras@v1
+      - name: Install oras Python SDK
+        run: pip install oras
 
       - name: Log in to Container Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3

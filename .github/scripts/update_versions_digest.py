@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
-import subprocess
 from pathlib import Path
+
+import oras.client
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,20 +45,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def verify_image_exists(image_ref: str) -> None:
-    """Verify that the image exists in the registry using oras."""
-    oras = shutil.which("oras")
-    if oras is None:
-        raise SystemExit("oras CLI not found on PATH; install it or pass --no-verify")
-
-    result = subprocess.run(
-        [oras, "manifest", "fetch", "--descriptor", image_ref],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise SystemExit(
-            f"image not found in registry: {image_ref}\n{result.stderr.strip()}"
-        )
+    """Verify that the image exists in the registry using oras Python SDK."""
+    client = oras.client.OrasClient()
+    try:
+        client.remote.get_manifest(image_ref)
+    except Exception as exc:
+        raise SystemExit(f"image not found in registry: {image_ref}\n{exc}") from exc
     print(f"verify: image exists in registry: {image_ref}")
 
 
