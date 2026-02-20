@@ -4,6 +4,7 @@ import yaml
 from click.testing import CliRunner
 
 from shade.cli import cli
+from shade.policy import AtlasPolicyFetchResult
 
 
 def _setup_project(tmp_path, shade_config: dict, compose: dict):
@@ -127,3 +128,63 @@ class TestInitCommand:
         result = runner.invoke(cli, ["init", "-d", str(tmp_path)])
         assert result.exit_code == 1
         assert "Error" in result.output
+
+
+class TestPolicyCommand:
+    """Test the 'shade policy' CLI command."""
+
+    def test_policy_success_stdout(self, monkeypatch):
+        def fake_get_atlas_policy(**kwargs):
+            return AtlasPolicyFetchResult(
+                repo=kwargs["repo"],
+                cvm=kwargs["cvm"],
+                ref=kwargs["ref"],
+                policy_path="cvm/policies/dev/atlas-policy.json",
+                url="https://raw.githubusercontent.com/acme/demo/main/cvm/policies/dev/atlas-policy.json",
+                policy={"type": "dstack_tdx", "allowed_tcb_status": ["UpToDate"]},
+            )
+
+        monkeypatch.setattr("shade.cli.api.get_atlas_policy", fake_get_atlas_policy)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["policy", "--repo", "acme/demo", "--cvm", "dev", "--ref", "main"],
+        )
+        assert result.exit_code == 0
+        assert '"type": "dstack_tdx"' in result.output
+        assert "Source URL:" in result.output
+
+    def test_policy_writes_file(self, monkeypatch, tmp_path):
+        def fake_get_atlas_policy(**kwargs):
+            return AtlasPolicyFetchResult(
+                repo="acme/demo",
+                cvm="dev",
+                ref="main",
+                policy_path="cvm/policies/dev/atlas-policy.json",
+                url="https://example.invalid/policy.json",
+                policy={"type": "dstack_tdx"},
+            )
+
+        monkeypatch.setattr("shade.cli.api.get_atlas_policy", fake_get_atlas_policy)
+
+        out = tmp_path / "policy.json"
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["policy", "--repo", "acme/demo", "--cvm", "dev", "--output", str(out)],
+        )
+        assert result.exit_code == 0
+        assert out.exists()
+        assert '"type": "dstack_tdx"' in out.read_text()
+
+    def test_policy_error(self, monkeypatch):
+        def fake_get_atlas_policy(**kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("shade.cli.api.get_atlas_policy", fake_get_atlas_policy)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["policy", "--repo", "acme/demo", "--cvm", "dev"])
+        assert result.exit_code == 1
+        assert "Error: boom" in result.output
