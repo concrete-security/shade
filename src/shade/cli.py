@@ -74,7 +74,96 @@ def init(output_dir: str):
         sys.exit(1)
 
 
-@cli.command()
+# ---------------------------------------------------------------------------
+# shade policy <subcommand>
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def policy():
+    """Atlas policy commands (generate or fetch)."""
+    pass
+
+
+def _write_policy_output(policy_dict: dict, output: str) -> None:
+    """Render policy JSON and write to stdout or file."""
+    rendered = json.dumps(policy_dict, indent=2) + "\n"
+    if output == "-":
+        click.echo(rendered, nl=False)
+    else:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(rendered, encoding="utf-8")
+        click.echo(f"Wrote {out_path}")
+
+
+@policy.command()
+@click.option(
+    "--domain",
+    default=None,
+    help="CVM domain to fetch measurements from (e.g., vllm.concrete-security.com).",
+)
+@click.option(
+    "--compose",
+    "-f",
+    default=None,
+    type=click.Path(exists=True),
+    help="Docker-compose file to verify against the CVM (recommended for production).",
+)
+@click.option(
+    "--allowed-tcb-status",
+    default=None,
+    help="Comma-separated TCB status values (default: UpToDate).",
+)
+@click.option(
+    "--disable-runtime-verification",
+    is_flag=True,
+    default=False,
+    help="Skip runtime verification (dev mode only).",
+)
+@click.option(
+    "--output",
+    "-o",
+    default="-",
+    show_default=True,
+    help="Output file path, or '-' for stdout.",
+)
+def generate(
+    domain: str | None,
+    compose: str | None,
+    allowed_tcb_status: str | None,
+    disable_runtime_verification: bool,
+    output: str,
+):
+    """Generate an Atlas-compatible policy.
+
+    \b
+    Production:  shade policy generate --domain vllm.example.com --compose docker-compose.shade.yml
+    Dev mode:    shade policy generate --disable-runtime-verification
+    """
+    try:
+        tcb_list = None
+        if allowed_tcb_status is not None:
+            tcb_list = [s.strip() for s in allowed_tcb_status.split(",") if s.strip()]
+
+        compose_content = None
+        if compose is not None:
+            compose_content = Path(compose).read_text(encoding="utf-8")
+
+        policy_dict = api.generate_atlas_policy(
+            domain=domain,
+            docker_compose_file=compose_content,
+            allowed_tcb_status=tcb_list,
+            disable_runtime_verification=disable_runtime_verification,
+        )
+    except (ValueError, RuntimeError) as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    _write_policy_output(policy_dict, output)
+
+
+@policy.command()
 @click.option(
     "--repo",
     required=True,
@@ -114,7 +203,7 @@ def init(output_dir: str):
     default=False,
     help="Skip Atlas policy shape validation.",
 )
-def policy(
+def fetch(
     repo: str,
     cvm: str,
     ref: str,
@@ -124,7 +213,7 @@ def policy(
     output: str,
     no_validate_shape: bool,
 ):
-    """Fetch Atlas policy for a specific repo/CVM target."""
+    """Fetch Atlas policy from a GitHub repository."""
     try:
         result = api.get_atlas_policy(
             repo=repo,
@@ -139,13 +228,5 @@ def policy(
         click.echo(f"Error: {e}", err=True)
         sys.exit(1)
 
-    rendered = json.dumps(result.policy, indent=2) + "\n"
-    if output == "-":
-        click.echo(rendered, nl=False)
-    else:
-        out_path = Path(output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(rendered, encoding="utf-8")
-        click.echo(f"Wrote {out_path}")
-
+    _write_policy_output(result.policy, output)
     click.echo(f"Source URL: {result.url}", err=True)

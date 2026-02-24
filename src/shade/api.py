@@ -18,6 +18,9 @@ from shade.policy import (
     AtlasPolicyFetchResult,
     fetch_atlas_policy,
 )
+from shade.policy import (
+    generate_atlas_policy as _generate_atlas_policy,
+)
 
 
 @dataclass
@@ -178,4 +181,37 @@ def get_atlas_policy(
         base_url=base_url,
         timeout=timeout,
         validate_shape=validate_shape,
+    )
+
+
+def generate_atlas_policy(
+    domain: str | None = None,
+    *,
+    docker_compose_file: str | None = None,
+    allowed_tcb_status: list[str] | None = None,
+    disable_runtime_verification: bool = False,
+) -> dict:
+    """Generate an Atlas-compatible policy for a CVM deployment.
+
+    Production mode (domain provided): fetches measurements and app_compose
+    from the CVM's /tdx_quote endpoint.
+
+    Dev mode (disable_runtime_verification=True): skips runtime verification,
+    no domain or measurements needed.
+
+    Args:
+        domain: CVM domain to fetch measurements from (required for production).
+        docker_compose_file: Local docker-compose content to verify against
+            the CVM's reported compose. Recommended for production.
+        allowed_tcb_status: Allowed TCB status values. Defaults to ["UpToDate"].
+        disable_runtime_verification: Skip runtime checks (dev only).
+
+    Returns:
+        Atlas policy dict ready for JSON serialization.
+    """
+    return _generate_atlas_policy(
+        domain=domain,
+        docker_compose_file=docker_compose_file,
+        allowed_tcb_status=allowed_tcb_status,
+        disable_runtime_verification=disable_runtime_verification,
     )
