@@ -7,7 +7,6 @@ HMAC signatures on EKM headers to prevent forgery attacks.
 
 import hashlib
 import hmac
-import os
 import sys
 from pathlib import Path
 
@@ -15,9 +14,6 @@ import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# Set required environment variable before importing
-os.environ["EKM_SHARED_SECRET"] = "test_shared_secret_for_ekm_validation_min_32_chars"
 
 from attestation_service import validate_and_extract_ekm
 

@@ -46,8 +46,7 @@ RUN sed -i '1i load_module /usr/lib/nginx/modules/ngx_http_ekm_module.so;' /etc/
 
 # Test: verify that config is correct and that the module is loaded correctly
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
-RUN nginx -t && \
-    nginx -T 2>&1 | grep -q "ngx_http_ekm_module" || exit 1
+RUN nginx -T 2>&1 | grep -q "ngx_http_ekm_module" || exit 1
 
 # ghcr.io/astral-sh/uv:0.9.5
 COPY --from=ghcr.io/astral-sh/uv@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40ec34b39a1ab469acd6e289b7 /uv /uvx /bin/

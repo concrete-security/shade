@@ -30,8 +30,8 @@ def test_tdx_quote_post(base_url, no_tdx=False):
         # Generate a random EKM value (32 bytes = 64 hex characters)
         ekm_hex = secrets.token_hex(32)
 
-        # Should match what's in the Makefile
-        ekm_secret = "test_shared_secret_for_ekm_validation_min_32_chars"
+        # Must match DEV_EKM_SHARED_SECRET in the Makefile
+        ekm_secret = "dev-mode-ekm-placeholder-not-for-production"
 
         # Compute HMAC signature for the EKM header
         hmac_value = hmac.new(

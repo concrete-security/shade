@@ -267,6 +267,61 @@ class TestGenerateVolumes:
         assert "my-data" in result["volumes"]
 
 
+class TestGenerateConfigs:
+    """Test top-level configs and secrets preservation."""
+
+    def test_preserves_user_configs(self):
+        compose = {
+            "services": {
+                "my-app": {
+                    "image": "python:3.11",
+                    "configs": [{"source": "app_config", "target": "/app/config.yml"}],
+                },
+            },
+            "configs": {
+                "app_config": {"file": "./config.yml"},
+            },
+        }
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            cvm=CvmConfig(domain="example.com"),
+        )
+        result = generate(config, compose)
+        assert "configs" in result
+        assert "app_config" in result["configs"]
+        assert result["configs"]["app_config"] == {"file": "./config.yml"}
+
+    def test_preserves_user_secrets(self):
+        compose = {
+            "services": {
+                "my-app": {
+                    "image": "python:3.11",
+                    "secrets": ["db_password"],
+                },
+            },
+            "secrets": {
+                "db_password": {"file": "./db_password.txt"},
+            },
+        }
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            cvm=CvmConfig(domain="example.com"),
+        )
+        result = generate(config, compose)
+        assert "secrets" in result
+        assert "db_password" in result["secrets"]
+        assert result["secrets"]["db_password"] == {"file": "./db_password.txt"}
+
+    def test_no_configs_key_when_absent(self):
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            cvm=CvmConfig(domain="example.com"),
+        )
+        result = generate(config, _minimal_compose())
+        assert "configs" not in result
+        assert "secrets" not in result
+
+
 class TestGenerateCors:
     """Test CORS origins in nginx env."""
 

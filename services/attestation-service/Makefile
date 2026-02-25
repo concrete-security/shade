@@ -7,7 +7,8 @@ CONTAINER_NAME = attestation-service
 CONTAINER_PORT = 8080
 HOST_PORT = 8080
 BASE_URL = http://localhost:$(HOST_PORT)
-DEV_EKM_SHARED_SECRET = test_shared_secret_for_ekm_validation_min_32_chars
+# Dev fallback for environments without dstack socket
+DEV_EKM_SHARED_SECRET = dev-mode-ekm-placeholder-not-for-production
 
 .PHONY: help build run test test-build test-api clean dev all
 
@@ -65,11 +66,11 @@ endif
 
 dev:
 	uv sync
-	uv run fastapi run attestation_service.py --port $(HOST_PORT) --reload
+	EKM_SHARED_SECRET=$(DEV_EKM_SHARED_SECRET) uv run fastapi run attestation_service.py --port $(HOST_PORT) --reload
 
 dev-debug:
 	uv sync
-	uv run fastapi run attestation_service_with_debug.py --port $(HOST_PORT) --reload
+	EKM_SHARED_SECRET=$(DEV_EKM_SHARED_SECRET) uv run fastapi run attestation_service_with_debug.py --port $(HOST_PORT) --reload
 
 docs:
 	@echo "API documentation available at:"

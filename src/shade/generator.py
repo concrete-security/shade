@@ -155,7 +155,6 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         f"LETSENCRYPT_ACCOUNT_VERSION={config.cvm.tls.letsencrypt_account_version}",
         "FORCE_RM_CERT_FILES=false",
         "LOG_LEVEL=INFO",
-        "EKM_SHARED_SECRET=${EKM_SHARED_SECRET}",
     ]
 
     # Escape nginx/template variables in fragments (contain $host, ${CORS_HEADERS}, etc.)
@@ -185,7 +184,6 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
             "HOST=0.0.0.0",
             "PORT=8080",
             "WORKERS=8",
-            "EKM_SHARED_SECRET=${EKM_SHARED_SECRET}",
         ],
         "volumes": ["/var/run/dstack.sock:/var/run/dstack.sock"],
         "expose": ["8080"],
@@ -230,5 +228,19 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
     for vol_name, vol_def in user_volumes.items():
         if vol_name not in result["volumes"]:
             result["volumes"][vol_name] = vol_def
+
+    # ---- Configs ----
+    user_configs = user_compose.get("configs", {})
+    if user_configs:
+        result["configs"] = {}
+        for cfg_name, cfg_def in user_configs.items():
+            result["configs"][cfg_name] = cfg_def
+
+    # ---- Secrets ----
+    user_secrets = user_compose.get("secrets", {})
+    if user_secrets:
+        result["secrets"] = {}
+        for sec_name, sec_def in user_secrets.items():
+            result["secrets"][sec_name] = sec_def
 
     return result
