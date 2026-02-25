@@ -137,7 +137,7 @@ jobs:
   update-digest:
     name: Update Digest References
     needs: [build-and-push, provenance]
-    if: always() && needs.build-and-push.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && needs.build-and-push.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -146,6 +146,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine branch
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "name=${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/heads/}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install oras Python SDK
         run: pip install oras
@@ -167,7 +179,18 @@ jobs:
             --service-key cert-manager \
             --image-ref "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.short_sha.outputs.tag }}"
 
+      - name: Commit and push to branch
+        if: github.ref != 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/shade/versions.py docker-compose.yml
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "chore(ci): update cert-manager image tag to ${{ steps.short_sha.outputs.tag }}"
+          git push origin HEAD:${{ steps.branch.outputs.name }}
+
       - name: Open image ref update PR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
