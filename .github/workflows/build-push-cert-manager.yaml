@@ -171,7 +171,9 @@ jobs:
 
       - name: Compute short SHA tag
         id: short_sha
-        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: |
+          SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "tag=sha-${SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Update versions.py and docker-compose.yml image ref
         run: |
