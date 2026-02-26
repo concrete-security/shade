@@ -177,6 +177,9 @@ jobs:
         id: short_sha
         run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
+      - name: Install script dependencies
+        run: pip install oras
+
       - name: Update versions.py and docker-compose.yml image ref
         run: |
           python .github/scripts/update_versions_digest.py \
