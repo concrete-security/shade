@@ -65,8 +65,16 @@ class CorsConfig(BaseModel):
 
 
 class TlsConfig(BaseModel):
-    """TLS configuration."""
+    """TLS configuration.
 
+    mode: "letsencrypt" (default) or "self-signed".
+      - letsencrypt: obtain a Let's Encrypt certificate (falls back to
+        TEE-derived self-signed on failure).
+      - self-signed: use a TEE-derived self-signed certificate directly.
+        Clients verify trust via TDX attestation (aTLS).
+    """
+
+    mode: str = "letsencrypt"
     letsencrypt_staging: bool = False
     letsencrypt_account_version: str = "v1"
 

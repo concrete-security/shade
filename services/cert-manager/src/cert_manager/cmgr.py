@@ -46,6 +46,7 @@ class CertificateManager:
         cert_path: str = "/etc/nginx/ssl",
         acme_path: str = "/acme-challenge/",
         force_rm_cert_files: bool = False,
+        skip_letsencrypt: bool = False,
     ):
         self.domain = domain
         self.dev_mode = dev_mode
@@ -53,6 +54,7 @@ class CertificateManager:
         self.letsencrypt_staging = letsencrypt_staging
         # used to easily switch to another account
         self.letsencrypt_account_version = letsencrypt_account_version
+        self.skip_letsencrypt = skip_letsencrypt
         self.supervisor = Supervisor()
 
         self.cert_path = Path(cert_path)
@@ -463,6 +465,16 @@ class CertificateManager:
             private_key = self.generate_deterministic_key(f"cert/debug/{self.domain}/v1")
             cert_chain = self.create_self_signed_cert(private_key)
             self.save_certificate_and_key(cert_chain, private_key)
+        elif self.skip_letsencrypt:  # TEE self-signed mode: skip LE, use TEE-derived keys
+            logger.info(
+                "SKIP_LETSENCRYPT is set — using TEE-derived self-signed certificate. "
+                "Clients must verify trust via TDX attestation (aTLS)."
+            )
+            private_key = self.generate_deterministic_key(
+                f"cert/tee-self-signed/{self.domain}/v1"
+            )
+            cert_chain = self.create_self_signed_cert(private_key)
+            self.save_certificate_and_key(cert_chain, private_key)
         # TODO: sync using S3 bucket for multiple replicas (in production)
         # We should have a lock file, then only one will push its generated cert, Others
         # will download it.
@@ -537,12 +549,14 @@ class CertificateManager:
         except Exception as e:
             logger.error(f"Failed to force delete certificate files: {e}")
 
-        # If in production with a routable domain, delete any existing self-signed
-        # certificate so Let's Encrypt can replace it. Skip deletion for localhost /
-        # non-routable domains where the TEE self-signed fallback is the expected cert.
+        # If in production with a routable domain and LE is enabled, delete any
+        # existing self-signed certificate so Let's Encrypt can replace it. Skip
+        # deletion when skip_letsencrypt is set (self-signed is the intended cert),
+        # for localhost, or non-routable domains.
         try:
             if (
                 not self.dev_mode
+                and not self.skip_letsencrypt
                 and self.is_cert_self_signed()
                 and self.domain not in ("localhost", "127.0.0.1")
             ):

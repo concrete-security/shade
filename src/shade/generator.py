@@ -160,6 +160,7 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         f"CORS_ORIGINS={cors_origins_escaped}",
         f"AUTH_ENABLED={'true' if config.plugins.auth.enabled else 'false'}",
         "DEV_MODE=false",
+        f"SKIP_LETSENCRYPT={'true' if config.cvm.tls.mode == 'self-signed' else 'false'}",
         f"LETSENCRYPT_STAGING={'true' if config.cvm.tls.letsencrypt_staging else 'false'}",
         f"LETSENCRYPT_ACCOUNT_VERSION={config.cvm.tls.letsencrypt_account_version}",
         "FORCE_RM_CERT_FILES=false",
@@ -192,7 +193,7 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         "environment": [
             "HOST=0.0.0.0",
             "PORT=8080",
-            "WORKERS=8",
+            "WORKERS=1",
         ],
         "volumes": ["/var/run/dstack.sock:/var/run/dstack.sock"],
         "expose": ["8080"],
