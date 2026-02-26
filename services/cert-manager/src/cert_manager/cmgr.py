@@ -139,12 +139,15 @@ class CertificateManager:
         )
 
         # Create Certificate Signing Request with our deterministic private key
+        # X.509 CN is limited to 64 characters; long domains (e.g. Phala CVM)
+        # are truncated in CN and carried in full via SAN (no length limit).
+        cn_value = self.domain if len(self.domain) <= 64 else self.domain[:64]
         csr = (
             x509.CertificateSigningRequestBuilder()
             .subject_name(
                 x509.Name(
                     [
-                        x509.NameAttribute(NameOID.COMMON_NAME, self.domain),
+                        x509.NameAttribute(NameOID.COMMON_NAME, cn_value),
                     ]
                 )
             )
@@ -200,10 +203,12 @@ class CertificateManager:
         logger.info("Creating self-signed certificate for development")
 
         # Create certificate
+        # X.509 CN is limited to 64 characters; truncate for long domains.
+        cn_value = self.domain if len(self.domain) <= 64 else self.domain[:64]
         subject = issuer = x509.Name(
             [
                 x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Concrete Security"),
-                x509.NameAttribute(NameOID.COMMON_NAME, self.domain),
+                x509.NameAttribute(NameOID.COMMON_NAME, cn_value),
             ]
         )
 
