@@ -103,25 +103,6 @@ When `disable_runtime_verification` is set, only the TCB status check is perform
 - `TDRelaunchAdvised` — TD relaunch recommended
 - `Revoked` — platform revoked
 
-## Policy Fetching
-
-Shade can also fetch pre-built policies from GitHub repositories:
-
-```bash
-shade policy fetch \
-  --repo concrete-security/secure-chat \
-  --cvm prod \
-  --ref main \
-  -o policy.json
-```
-
-```python
-from shade import get_atlas_policy
-
-result = get_atlas_policy(repo="concrete-security/secure-chat", cvm="prod")
-policy = result.policy
-```
-
 ## Development
 
 ```bash

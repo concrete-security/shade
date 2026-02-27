@@ -3,8 +3,7 @@
 import pytest
 import yaml
 
-from shade.api import build, generate_atlas_policy, get_atlas_policy, init, validate
-from shade.policy import AtlasPolicyFetchResult
+from shade.api import build, generate_atlas_policy, init, validate
 
 
 @pytest.fixture
@@ -164,62 +163,6 @@ class TestInit:
         (tmp_path / "shade.yml").write_text("existing")
         with pytest.raises(FileExistsError):
             init(output_dir=tmp_path)
-
-
-class TestGetAtlasPolicy:
-    """Test get_atlas_policy API wrapper."""
-
-    def test_get_atlas_policy_delegates(self, monkeypatch):
-        captured: dict[str, object] = {}
-
-        def fake_fetch(
-            repo: str,
-            cvm: str,
-            ref: str,
-            *,
-            path_template: str,
-            base_url: str,
-            timeout: float,
-            validate_shape: bool,
-        ) -> AtlasPolicyFetchResult:
-            captured["repo"] = repo
-            captured["cvm"] = cvm
-            captured["ref"] = ref
-            captured["path_template"] = path_template
-            captured["base_url"] = base_url
-            captured["timeout"] = timeout
-            captured["validate_shape"] = validate_shape
-            return AtlasPolicyFetchResult(
-                repo=repo,
-                cvm=cvm,
-                ref=ref,
-                policy_path="cvm/policies/dev/atlas-policy.json",
-                url="https://example.invalid/policy.json",
-                policy={"type": "dstack_tdx"},
-            )
-
-        monkeypatch.setattr("shade.api.fetch_atlas_policy", fake_fetch)
-
-        result = get_atlas_policy(
-            repo="acme/demo",
-            cvm="dev",
-            ref="main",
-            timeout=15.0,
-            validate_shape=False,
-        )
-
-        assert result.repo == "acme/demo"
-        assert result.cvm == "dev"
-        assert result.policy["type"] == "dstack_tdx"
-        assert captured == {
-            "repo": "acme/demo",
-            "cvm": "dev",
-            "ref": "main",
-            "path_template": "cvm/policies/{cvm}/atlas-policy.json",
-            "base_url": "https://raw.githubusercontent.com",
-            "timeout": 15.0,
-            "validate_shape": False,
-        }
 
 
 class TestGenerateAtlasPolicy:

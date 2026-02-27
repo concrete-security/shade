@@ -13,12 +13,6 @@ from shade.compose import load_user_compose, validate_app_service, validate_rout
 from shade.config import ShadeConfig, load_shade_config
 from shade.generator import generate
 from shade.policy import (
-    DEFAULT_POLICY_BASE_URL,
-    DEFAULT_POLICY_PATH_TEMPLATE,
-    AtlasPolicyFetchResult,
-    fetch_atlas_policy,
-)
-from shade.policy import (
     generate_atlas_policy as _generate_atlas_policy,
 )
 
@@ -147,41 +141,6 @@ def init(output_dir: str | Path = ".") -> Path:
 
     shutil.copy2(template_path, target_path)
     return target_path
-
-
-def get_atlas_policy(
-    repo: str,
-    cvm: str,
-    ref: str = "main",
-    *,
-    path_template: str = DEFAULT_POLICY_PATH_TEMPLATE,
-    base_url: str = DEFAULT_POLICY_BASE_URL,
-    timeout: float = 20.0,
-    validate_shape: bool = True,
-) -> AtlasPolicyFetchResult:
-    """Fetch an Atlas policy for a specific repo + CVM target.
-
-    Args:
-        repo: Repository in owner/repo format.
-        cvm: CVM target identifier (for example: dev, prod, us-east).
-        ref: Git ref (branch, tag, or commit SHA).
-        path_template: Policy path template, must include "{cvm}".
-        base_url: Raw-content base URL.
-        timeout: HTTP timeout in seconds.
-        validate_shape: Validate the returned JSON has Atlas policy shape.
-
-    Returns:
-        AtlasPolicyFetchResult including source URL and parsed policy document.
-    """
-    return fetch_atlas_policy(
-        repo=repo,
-        cvm=cvm,
-        ref=ref,
-        path_template=path_template,
-        base_url=base_url,
-        timeout=timeout,
-        validate_shape=validate_shape,
-    )
 
 
 def generate_atlas_policy(

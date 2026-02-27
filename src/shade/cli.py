@@ -10,7 +10,6 @@ from pathlib import Path
 import click
 
 from shade import api
-from shade.policy import DEFAULT_POLICY_BASE_URL, DEFAULT_POLICY_PATH_TEMPLATE
 
 
 @click.group()
@@ -81,7 +80,7 @@ def init(output_dir: str):
 
 @cli.group()
 def policy():
-    """Atlas policy commands (generate or fetch)."""
+    """Atlas policy commands."""
     pass
 
 
@@ -161,72 +160,3 @@ def generate(
         sys.exit(1)
 
     _write_policy_output(policy_dict, output)
-
-
-@policy.command()
-@click.option(
-    "--repo",
-    required=True,
-    help="Repository in owner/repo format (for example: concrete-security/secure-chat).",
-)
-@click.option("--cvm", required=True, help="CVM target name (for example: dev).")
-@click.option("--ref", default="main", show_default=True, help="Git ref (branch/tag/SHA).")
-@click.option(
-    "--path-template",
-    default=DEFAULT_POLICY_PATH_TEMPLATE,
-    show_default=True,
-    help="Policy path template; must contain '{cvm}'.",
-)
-@click.option(
-    "--base-url",
-    default=DEFAULT_POLICY_BASE_URL,
-    show_default=True,
-    help="Raw-content base URL.",
-)
-@click.option(
-    "--timeout",
-    default=20.0,
-    show_default=True,
-    type=float,
-    help="HTTP timeout in seconds.",
-)
-@click.option(
-    "--output",
-    "-o",
-    default="-",
-    show_default=True,
-    help="Output file path, or '-' for stdout.",
-)
-@click.option(
-    "--no-validate-shape",
-    is_flag=True,
-    default=False,
-    help="Skip Atlas policy shape validation.",
-)
-def fetch(
-    repo: str,
-    cvm: str,
-    ref: str,
-    path_template: str,
-    base_url: str,
-    timeout: float,
-    output: str,
-    no_validate_shape: bool,
-):
-    """Fetch Atlas policy from a GitHub repository."""
-    try:
-        result = api.get_atlas_policy(
-            repo=repo,
-            cvm=cvm,
-            ref=ref,
-            path_template=path_template,
-            base_url=base_url,
-            timeout=timeout,
-            validate_shape=not no_validate_shape,
-        )
-    except (ValueError, RuntimeError) as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-    _write_policy_output(result.policy, output)
-    click.echo(f"Source URL: {result.url}", err=True)
