@@ -48,7 +48,7 @@ def verify_image_exists(image_ref: str) -> None:
     """Verify that the image exists in the registry using oras Python SDK."""
     client = oras.client.OrasClient()
     try:
-        client.remote.get_manifest(image_ref)
+        client.get_manifest(image_ref)
     except Exception as exc:
         raise SystemExit(f"image not found in registry: {image_ref}\n{exc}") from exc
     print(f"verify: image exists in registry: {image_ref}")

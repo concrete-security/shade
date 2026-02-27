@@ -58,6 +58,15 @@ def _render_locations(config: ShadeConfig) -> str:
 
         # Proxy configuration
         lines.append(f"        proxy_pass http://{upstream};")
+
+        # WebSocket support (opt-in per route)
+        if route.websocket:
+            lines.append("        proxy_http_version 1.1;")
+            lines.append("        proxy_set_header Upgrade $http_upgrade;")
+            lines.append("        proxy_set_header Connection $connection_upgrade;")
+            lines.append("        proxy_read_timeout 3600s;")
+            lines.append("        proxy_send_timeout 3600s;")
+
         lines.append("        proxy_set_header Host $host;")
         lines.append("        proxy_set_header X-Real-IP $remote_addr;")
         lines.append("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;")

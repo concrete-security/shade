@@ -218,6 +218,39 @@ class TestGenerateRoutes:
         locations = [e for e in nginx_env if e.startswith("EXTRA_LOCATIONS=")][0]
         assert "auth_request /_auth" in locations
 
+    def test_websocket_route_includes_upgrade_headers(self):
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            services={"my-app": ServiceRef(networks=["proxy"])},
+            cvm=CvmConfig(
+                domain="example.com",
+                routes=[RouteConfig(path="/admin", port=8000, websocket=True)],
+            ),
+        )
+        result = generate(config, _minimal_compose())
+        nginx_env = result["services"]["nginx-cert-manager"]["environment"]
+        locations = [e for e in nginx_env if e.startswith("EXTRA_LOCATIONS=")][0]
+        assert "proxy_http_version 1.1" in locations
+        assert "proxy_set_header Upgrade $$http_upgrade" in locations
+        assert "proxy_set_header Connection $$connection_upgrade" in locations
+        assert "proxy_read_timeout 3600s" in locations
+        assert "proxy_send_timeout 3600s" in locations
+
+    def test_non_websocket_route_excludes_upgrade_headers(self):
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            services={"my-app": ServiceRef(networks=["proxy"])},
+            cvm=CvmConfig(
+                domain="example.com",
+                routes=[RouteConfig(path="/", port=8000)],
+            ),
+        )
+        result = generate(config, _minimal_compose())
+        nginx_env = result["services"]["nginx-cert-manager"]["environment"]
+        locations = [e for e in nginx_env if e.startswith("EXTRA_LOCATIONS=")][0]
+        assert "proxy_http_version" not in locations
+        assert "Upgrade" not in locations
+
 
 class TestGenerateAuth:
     """Test auth plugin generation."""

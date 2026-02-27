@@ -36,6 +36,7 @@ class RouteConfig(BaseModel):
     port: int  # target service port
     auth_required: bool = False  # requires auth plugin enabled
     cors: bool = True  # inherit CORS settings
+    websocket: bool = False  # opt-in WebSocket upgrade proxying
 
     @field_validator("path")
     @classmethod
