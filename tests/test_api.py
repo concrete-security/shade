@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from shade.api import build, init, validate
+from shade.api import build, generate_atlas_policy, init, validate
 
 
 @pytest.fixture
@@ -163,3 +163,61 @@ class TestInit:
         (tmp_path / "shade.yml").write_text("existing")
         with pytest.raises(FileExistsError):
             init(output_dir=tmp_path)
+
+
+class TestGenerateAtlasPolicy:
+    """Test generate_atlas_policy API wrapper."""
+
+    def test_generate_atlas_policy_delegates(self, monkeypatch):
+        captured: dict[str, object] = {}
+
+        def fake_generate(
+            domain=None,
+            *,
+            docker_compose_file=None,
+            allowed_tcb_status=None,
+            disable_runtime_verification=False,
+        ):
+            captured["domain"] = domain
+            captured["docker_compose_file"] = docker_compose_file
+            captured["allowed_tcb_status"] = allowed_tcb_status
+            captured["disable_runtime_verification"] = disable_runtime_verification
+            return {"type": "dstack_tdx", "disable_runtime_verification": True}
+
+        monkeypatch.setattr("shade.api._generate_atlas_policy", fake_generate)
+
+        result = generate_atlas_policy(
+            disable_runtime_verification=True,
+        )
+
+        assert result["type"] == "dstack_tdx"
+        assert captured["domain"] is None
+        assert captured["disable_runtime_verification"] is True
+
+    def test_generate_atlas_policy_production_delegates(self, monkeypatch):
+        captured: dict[str, object] = {}
+
+        def fake_generate(
+            domain=None,
+            *,
+            docker_compose_file=None,
+            allowed_tcb_status=None,
+            disable_runtime_verification=False,
+        ):
+            captured["domain"] = domain
+            captured["docker_compose_file"] = docker_compose_file
+            captured["allowed_tcb_status"] = allowed_tcb_status
+            return {"type": "dstack_tdx"}
+
+        monkeypatch.setattr("shade.api._generate_atlas_policy", fake_generate)
+
+        result = generate_atlas_policy(
+            domain="vllm.example.com",
+            docker_compose_file="services: {}",
+            allowed_tcb_status=["UpToDate", "SWHardeningNeeded"],
+        )
+
+        assert result["type"] == "dstack_tdx"
+        assert captured["domain"] == "vllm.example.com"
+        assert captured["docker_compose_file"] == "services: {}"
+        assert captured["allowed_tcb_status"] == ["UpToDate", "SWHardeningNeeded"]

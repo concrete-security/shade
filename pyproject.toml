@@ -32,6 +32,7 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: marks tests that require external services (deselect with '-m \"not integration\"')"]
 
 [dependency-groups]
 dev = [
