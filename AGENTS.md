@@ -122,7 +122,8 @@ make dev-down
 ## Testing Notes
 
 - Root unit tests cover config parsing, compose validation, generator output, CLI behavior, API behavior, and version drift checks.
-- `test_cvm.py` exercises the stack through nginx, including health checks, redirects, ACME behavior, certificate behavior, attestation paths, CORS, and dev-only EKM debug paths.
+- `test_cvm.py` exercises the stack through nginx. The default dev suite covers health checks, redirects, ACME behavior, certificate behavior, CORS, app routing, and dev-only EKM debug paths without calling `/tdx_quote`.
+- Use `make test-attestation` only on a real TDX host when you need quote validation.
 - The root `docker-compose.yml` and `docker-compose.dev.override.yml` are repository test fixtures, not examples of the generated `shade build` output format.
 - Service directories contain their own code and, in some cases, their own tests and documentation.
 

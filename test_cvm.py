@@ -413,6 +413,11 @@ class ShadeTester:
 
     def test_attestation(self) -> bool:
         """Test attestation service endpoints"""
+        if self.dev_mode:
+            self._print_test_header("Testing Attestation Service Endpoints (Skipped in Dev Mode)")
+            self._print_warning("Skipping /tdx_quote in local dev mode; run this check on a TDX host.")
+            return True
+
         mode = "Development" if self.dev_mode else "Production"
         self._print_test_header(f"Testing Attestation Service Endpoints ({mode} Mode)")
 
@@ -465,18 +470,22 @@ class ShadeTester:
         # Test framework endpoints for CORS
         test_endpoints = [
             {
-                "path": "/tdx_quote",
-                "name": "TDX Quote (Attestation)",
-                "test_methods": ["OPTIONS", "POST"],
-                "post_payload": {"nonce_hex": secrets.token_hex(32)},
-            },
-            {
                 "path": "/v1/models",
                 "name": "App Models",
                 "test_methods": ["OPTIONS", "GET"],
                 "post_payload": None,
-            },
+            }
         ]
+        if not self.dev_mode:
+            test_endpoints.insert(
+                0,
+                {
+                    "path": "/tdx_quote",
+                    "name": "TDX Quote (Attestation)",
+                    "test_methods": ["OPTIONS", "POST"],
+                    "post_payload": {"nonce_hex": secrets.token_hex(32)},
+                },
+            )
 
         # Test allowed origins
         allowed_origins = [
@@ -850,11 +859,12 @@ class ShadeTester:
             "redirect": self.test_http_redirect(),
             "acme": self.test_acme_challenge(),
             "health": self.test_health(),
-            "attestation": self.test_attestation(),
             "cors": self.test_cors(),
             "app": self.test_app(),
             "ekm_headers": self.test_ekm_headers(),
         }
+        if not self.dev_mode:
+            results["attestation"] = self.test_attestation()
 
         print("\n" + "=" * 50)
         print("📊 Test Results Summary")
@@ -890,7 +900,7 @@ Examples:
   %(prog)s --health                 # Test only health endpoint
   %(prog)s --certificate            # Test only certificate validation
   %(prog)s --acme                   # Test only ACME challenge endpoint (Let's Encrypt compatibility)
-  %(prog)s --attestation --app      # Test attestation and app endpoints
+  %(prog)s --attestation --app      # Test attestation and app endpoints on a TDX host
   %(prog)s --wait                   # Wait for services to be ready
   %(prog)s --base-url https://myhost:8443  # Use custom base URL
         """,
@@ -929,7 +939,7 @@ Examples:
     parser.add_argument("--redirect", action="store_true", help="Test HTTP to HTTPS redirect")
     parser.add_argument("--acme", action="store_true", help="Test ACME challenge endpoint")
     parser.add_argument("--health", action="store_true", help="Test health endpoint")
-    parser.add_argument("--attestation", action="store_true", help="Test attestation service endpoints")
+    parser.add_argument("--attestation", action="store_true", help="Test attestation service endpoints (TDX-only)")
     parser.add_argument("--cors", action="store_true", help="Test CORS configuration")
     parser.add_argument("--app", action="store_true", help="Test app proxy endpoints")
     parser.add_argument("--ekm-headers", action="store_true", help="Test EKM header forwarding (dev mode only)")

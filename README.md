@@ -211,6 +211,11 @@ make dev-down
 `make dev-full` starts the local stack, waits for readiness, runs the end-to-end
 suite in `test_cvm.py`, and then tears the stack down.
 
+The default local suite is intentionally non-attested: it covers routing, TLS,
+CORS, app proxying, and dev EKM behavior without requiring `/tdx_quote` to work.
+Run `make test-attestation` separately on a real TDX host when you need quote
+validation.
+
 ## Services
 
 - `services/cert-manager/`: nginx config rendering, certificate lifecycle, and EKM extraction
