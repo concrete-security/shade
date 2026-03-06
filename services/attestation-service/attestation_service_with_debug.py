@@ -15,13 +15,14 @@ import secrets
 from fastapi import Request
 
 # Import the production app and necessary constants
-from attestation_service import EKM_SHARED_SECRET, HEADER_TLS_EKM_CHANNEL_BINDING, app
+from attestation_service import HEADER_TLS_EKM_CHANNEL_BINDING, app, get_ekm_hmac_secret
 
 
 @app.get("/debug/ekm")
 async def debug_ekm_header(request: Request):
     """Debug endpoint to verify EKM header forwarding and HMAC validation"""
     signed_header = request.headers.get(HEADER_TLS_EKM_CHANNEL_BINDING, "")
+    ekm_secret = get_ekm_hmac_secret()
 
     # Parse signed header
     if signed_header and len(signed_header) == 129 and signed_header[64] == ":":
@@ -31,9 +32,9 @@ async def debug_ekm_header(request: Request):
 
         # Validate HMAC
         valid_hmac = False
-        if EKM_SHARED_SECRET:
+        if ekm_secret:
             expected_hmac = hmac.new(
-                EKM_SHARED_SECRET.encode("utf-8"), ekm_raw, hashlib.sha256
+                ekm_secret.encode("utf-8"), ekm_raw, hashlib.sha256
             ).hexdigest()
             valid_hmac = secrets.compare_digest(hmac_hex, expected_hmac)
 

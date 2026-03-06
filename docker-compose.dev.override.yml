@@ -52,15 +52,15 @@ services:
     build:
       context: ./services/attestation-service
       dockerfile: Dockerfile
-    # Mount debug script to enable debug endpoint in dev
     volumes:
       - ./services/attestation-service/attestation_service_with_debug.py:/app/attestation_service_with_debug.py:ro
+      - ./docker-compose.yml:/app/shade-compose.yml:ro
     environment:
       - WORKERS=1
-      # Use debug script in dev mode
       - SERVICE_SCRIPT=attestation_service_with_debug.py
-      # Dev-only shared secret for EKM HMAC (must match nginx-cert-manager)
       - EKM_SHARED_SECRET=dev-mode-ekm-placeholder-not-for-production
+      - ATTESTATION_MODE=mock
+      - MOCK_ATTESTATION_COMPOSE_PATH=/app/shade-compose.yml
     deploy:
       mode: replicated
       replicas: 1

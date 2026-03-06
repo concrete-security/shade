@@ -211,6 +211,10 @@ make dev-down
 `make dev-full` starts the local stack, waits for readiness, runs the end-to-end
 suite in `test_cvm.py`, and then tears the stack down.
 
+In dev mode, Shade now runs the attestation service with `ATTESTATION_MODE=mock`.
+That keeps EKM session binding real while returning a deterministic synthetic
+`/tdx_quote` payload marked as `quote_type="tdx.mock.v1"` for local-only testing.
+
 ## Services
 
 - `services/cert-manager/`: nginx config rendering, certificate lifecycle, and EKM extraction

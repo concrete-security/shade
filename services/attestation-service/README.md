@@ -86,6 +86,17 @@ See the `Makefile` for common operations:
 
 - **NO_TDX=true** (default): Runs without Dstack socket binding for development/testing
 - **NO_TDX=false**: Enables TDX hardware integration by binding to `/var/run/dstack.sock`
+- **ATTESTATION_MODE=real** (default): Uses the real dstack-backed quote flow
+- **ATTESTATION_MODE=mock**: Dev-only mode that keeps EKM validation real but returns a deterministic synthetic `/tdx_quote` payload
+- **MOCK_ATTESTATION_COMPOSE_PATH**: Required in mock mode; points at the compose file whose content should be surfaced through `tcb_info.app_compose`
+- **MOCK_ATTESTATION_OS_IMAGE_HASH** / **MOCK_ATTESTATION_CA_CERT_HASH**: Optional dev-only overrides for deterministic mock measurements
+
+### Mock Mode Notes
+
+- Mock mode is for local stack smoke only. It does **not** produce a DCAP-verifiable TDX quote.
+- `/tdx_quote` still validates the signed `X-TLS-EKM-Channel-Binding` header and computes real `report_data = SHA512(nonce || ekm)`.
+- The returned payload is marked with `quote_type="tdx.mock.v1"` and `tcb_info.mock_mode=true`.
+- Mock mode refuses to start if `/var/run/dstack.sock` resolves to a real socket, to avoid accidentally mixing real TDX state with synthetic quotes.
 
 ### Examples
 

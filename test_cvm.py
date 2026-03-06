@@ -435,21 +435,23 @@ class ShadeTester:
                 self._print_success("TDX quote endpoint working via HTTPS")
                 try:
                     data = response.json()
-                    if "quote" in data:
-                        self._print_info(f"Received quote with length: {len(data['quote'])}")
+                    if self.dev_mode and data.get("quote_type") != "tdx.mock.v1":
+                        self._print_error(
+                            f"Expected dev quote_type tdx.mock.v1, got {data.get('quote_type')}"
+                        )
+                        return False
+                    if not self.dev_mode and data.get("quote_type") == "tdx.mock.v1":
+                        self._print_error("Mock quote_type is not acceptable in production mode")
+                        return False
+                    quote_blob = data.get("quote", {}).get("quote")
+                    if isinstance(quote_blob, str):
+                        self._print_info(f"Received quote with length: {len(quote_blob)}")
                 except json.JSONDecodeError:
                     self._print_info("Response received but not JSON")
                 return True
             elif response.status_code == 500:
-                if self.dev_mode:
-                    # In dev mode, 500 errors are acceptable (mock environment)
-                    self._print_warning("TDX quote endpoint may require TDX environment (acceptable in dev mode)")
-                    self._print_info(f"Response status: {response.status_code}")
-                    return True
-                else:
-                    # In production mode, 500 errors are failures
-                    self._print_error("TDX quote endpoint failed with status 500 (not acceptable in production)")
-                    return False
+                self._print_error("TDX quote endpoint failed with status 500")
+                return False
             else:
                 self._print_error(f"TDX quote endpoint failed with status {response.status_code}")
                 return False
