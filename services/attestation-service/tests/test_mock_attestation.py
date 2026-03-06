@@ -23,9 +23,7 @@ def configure_mock_mode(monkeypatch, tmp_path: Path) -> Path:
     )
     monkeypatch.setenv("ATTESTATION_MODE", "mock")
     monkeypatch.setenv("MOCK_ATTESTATION_COMPOSE_PATH", str(compose_path))
-    monkeypatch.setenv(
-        "EKM_SHARED_SECRET", "dev-mode-ekm-placeholder-not-for-production"
-    )
+    monkeypatch.setenv("EKM_SHARED_SECRET", "dev-mode-ekm-placeholder-not-for-production")
     monkeypatch.delenv("MOCK_ATTESTATION_OS_IMAGE_HASH", raising=False)
     monkeypatch.delenv("MOCK_ATTESTATION_CA_CERT_HASH", raising=False)
     monkeypatch.setattr(attestation_service, "dstack_socket_present", lambda: False)
@@ -53,10 +51,13 @@ class TestMockAttestationEndpoint:
         assert body["tcb_info"]["os_image_hash"] == attestation_service.DEFAULT_MOCK_OS_IMAGE_HASH
 
         app_compose_str = body["tcb_info"]["app_compose"]
-        assert body["tcb_info"]["compose_hash"] == hashlib.sha256(
-            app_compose_str.encode("utf-8")
-        ).hexdigest()
-        assert str(compose_path) == str(attestation_service.get_mock_attestation_context().compose_path)
+        assert (
+            body["tcb_info"]["compose_hash"]
+            == hashlib.sha256(app_compose_str.encode("utf-8")).hexdigest()
+        )
+        assert str(compose_path) == str(
+            attestation_service.get_mock_attestation_context().compose_path
+        )
 
         quote = body["quote"]
         report_data = attestation_service.compute_report_data(payload["nonce_hex"], "ab" * 32)

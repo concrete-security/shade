@@ -310,7 +310,12 @@ def load_mock_attestation_context() -> MockAttestationContext:
     ca_digest = rtmr_history_digest(ca_cert_hash, "mock-ca-cert")
     history = [rootfs_digest, app_id_digest, ca_digest]
     event_log = [
-        {"imr": 3, "event": "os-image-hash", "event_payload": os_image_hash, "digest": rootfs_digest},
+        {
+            "imr": 3,
+            "event": "os-image-hash",
+            "event_payload": os_image_hash,
+            "digest": rootfs_digest,
+        },
         {"imr": 3, "event": "app-id", "event_payload": raw_compose_hash, "digest": app_id_digest},
         {"imr": 3, "event": "ca-cert-hash", "event_payload": ca_cert_hash, "digest": ca_digest},
         {"event": "compose-hash", "event_payload": compose_hash},
