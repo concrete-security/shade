@@ -71,12 +71,38 @@ class TlsConfig(BaseModel):
     letsencrypt_account_version: str = "v1"
 
 
+# Nginx size directive pattern (e.g. "10G", "500M", "1024").
+# Also validated in services/cert-manager/render_nginx_conf.py (separate runtime).
+_NGINX_SIZE_RE = r"\d+[kKmMgG]?"
+
+
+class NginxConfig(BaseModel):
+    """Nginx tuning configuration."""
+
+    max_body_size: str | None = None  # e.g. "10G", "500M". None = nginx default (1M)
+
+    @field_validator("max_body_size")
+    @classmethod
+    def _validate_max_body_size(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        import re
+
+        if not re.fullmatch(_NGINX_SIZE_RE, v):
+            raise ValueError(
+                f"invalid max_body_size '{v}', expected a number with optional "
+                "unit suffix (k, K, m, M, g, G), e.g. '10G', '500M', '1024'"
+            )
+        return v
+
+
 class CvmConfig(BaseModel):
     """CVM (Confidential VM) configuration."""
 
     domain: str
     cors: CorsConfig = CorsConfig()
     tls: TlsConfig = TlsConfig()
+    nginx: NginxConfig = NginxConfig()
     routes: list[RouteConfig] = []
 
     @model_validator(mode="after")

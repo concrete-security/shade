@@ -9,6 +9,7 @@ Reads template files and substitutes variables:
 - UPSTREAM_PORT: Backward compat: main app port (default: "")
 - EXTRA_UPSTREAMS: Pre-rendered nginx upstream blocks (default: "")
 - EXTRA_LOCATIONS: Pre-rendered nginx location blocks (default: "")
+- NGINX_MAX_BODY_SIZE: client_max_body_size value (default: "" = nginx default 1M)
 
 When UPSTREAM_HOST is set (backward compat mode), the renderer auto-generates
 an upstream and catch-all location, prepending/appending to EXTRA_UPSTREAMS/EXTRA_LOCATIONS.
@@ -17,6 +18,7 @@ an upstream and catch-all location, prepending/appending to EXTRA_UPSTREAMS/EXTR
 import json
 import os
 import logging
+import re
 
 logger = logging.getLogger("render-nginx-conf")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -138,6 +140,13 @@ def main():
     extra_upstreams = os.environ.get("EXTRA_UPSTREAMS", "")
     extra_locations = os.environ.get("EXTRA_LOCATIONS", "")
 
+    # Optional: client_max_body_size (default: nginx default = 1M)
+    # Pattern duplicated from src/shade/config._NGINX_SIZE_RE (separate runtime).
+    max_body_size = os.environ.get("NGINX_MAX_BODY_SIZE", "")
+    if max_body_size and not re.fullmatch(r"\d+[kKmMgG]?", max_body_size):
+        raise ValueError(f"invalid NGINX_MAX_BODY_SIZE: '{max_body_size}'")
+    client_max_body_size = f"    client_max_body_size {max_body_size};" if max_body_size else ""
+
     cors_block = render_cors_block(cors_origins)
     has_cors = bool(cors_block)
     cors_headers = render_cors_headers(has_cors)
@@ -169,6 +178,7 @@ def main():
         "AUTH_LOCATION": auth_location,
         "EXTRA_UPSTREAMS": extra_upstreams,
         "EXTRA_LOCATIONS": extra_locations,
+        "CLIENT_MAX_BODY_SIZE": client_max_body_size,
     }
 
     # Render base.conf

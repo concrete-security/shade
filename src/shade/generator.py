@@ -166,6 +166,9 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         "LOG_LEVEL=INFO",
     ]
 
+    if config.cvm.nginx.max_body_size:
+        nginx_env.append(f"NGINX_MAX_BODY_SIZE={config.cvm.nginx.max_body_size}")
+
     # Escape nginx/template variables in fragments (contain $host, ${CORS_HEADERS}, etc.)
     if extra_upstreams:
         nginx_env.append(f"EXTRA_UPSTREAMS={_escape_for_compose(extra_upstreams)}")
