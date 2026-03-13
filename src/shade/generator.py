@@ -57,7 +57,10 @@ def _render_locations(config: ShadeConfig) -> str:
             lines.append("${CORS_HEADERS}")
 
         # Proxy configuration
-        lines.append(f"        proxy_pass http://{upstream};")
+        if route.strip_prefix and route.path != "/":
+            lines.append(f"        proxy_pass http://{upstream}/;")
+        else:
+            lines.append(f"        proxy_pass http://{upstream};")
 
         # WebSocket support (opt-in per route)
         if route.websocket:
@@ -67,10 +70,17 @@ def _render_locations(config: ShadeConfig) -> str:
             lines.append("        proxy_read_timeout 3600s;")
             lines.append("        proxy_send_timeout 3600s;")
 
+        # Allow iframe embedding (strip upstream frame-blocking headers)
+        if route.allow_iframe:
+            lines.append("        proxy_hide_header X-Frame-Options;")
+            lines.append("        proxy_hide_header Content-Security-Policy;")
+
         lines.append("        proxy_set_header Host $host;")
         lines.append("        proxy_set_header X-Real-IP $remote_addr;")
         lines.append("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;")
         lines.append("        proxy_set_header X-Forwarded-Proto $scheme;")
+        if route.forward_tls_ekm:
+            lines.append("        proxy_set_header X-TLS-EKM-Channel-Binding $ekm_channel_binding;")
         lines.append("    }")
 
         blocks.append("\n".join(lines))
