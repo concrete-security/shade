@@ -30,26 +30,8 @@ def load_user_compose(path: str | Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"Invalid compose file: expected a YAML mapping, got {type(data)}")
 
-    if "services" not in data:
-        raise ValueError("Compose file must have a 'services' key")
-
     return data
 
-
-def validate_app_service(compose_data: dict, app_name: str) -> list[str]:
-    """Validate that the main app service exists in the compose file.
-
-    Returns:
-        List of error messages (empty = valid).
-    """
-    errors: list[str] = []
-    services = compose_data.get("services", {})
-    if app_name not in services:
-        errors.append(
-            f"Main app service '{app_name}' not found in docker-compose.yml. "
-            f"Available services: {', '.join(sorted(services.keys()))}"
-        )
-    return errors
 
 
 def validate_route_services(compose_data: dict, config: ShadeConfig) -> list[str]:

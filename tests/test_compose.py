@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from shade.compose import load_user_compose, validate_app_service, validate_route_services
+from shade.compose import load_user_compose, validate_route_services
 from shade.config import AppRef, CvmConfig, RouteConfig, ShadeConfig
 
 
@@ -41,29 +41,14 @@ class TestLoadUserCompose:
 
     def test_load_missing_services_key(self, tmp_compose):
         path = tmp_compose({"version": "3"})
-        with pytest.raises(ValueError, match="'services' key"):
-            load_user_compose(path)
+        data = load_user_compose(path)
+        assert "services" not in data
 
     def test_load_invalid_yaml(self, tmp_path):
         path = tmp_path / "docker-compose.yml"
         path.write_text("just a string")
         with pytest.raises(ValueError, match="expected a YAML mapping"):
             load_user_compose(str(path))
-
-
-class TestValidateAppService:
-    """Test app service validation."""
-
-    def test_app_exists(self):
-        data = {"services": {"my-app": {"image": "python:3.11"}}}
-        errors = validate_app_service(data, "my-app")
-        assert errors == []
-
-    def test_app_missing(self):
-        data = {"services": {"other": {"image": "python:3.11"}}}
-        errors = validate_app_service(data, "my-app")
-        assert len(errors) == 1
-        assert "my-app" in errors[0]
 
 
 class TestValidateRouteServices:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from shade.compose import load_user_compose, validate_app_service, validate_route_services
+from shade.compose import load_user_compose, validate_route_services
 from shade.config import ShadeConfig, load_shade_config
 from shade.generator import generate
 
@@ -31,13 +31,25 @@ class ValidateResult:
     errors: list[str]
     config: ShadeConfig | None = None
     compose_data: dict | None = None
+    checks: list | None = None  # list[CheckResult] from verify.py
 
 
 def _validate(
     config_path: str | Path = "shade.yml",
     compose_path: str | Path = "docker-compose.yml",
+    output_path: str | Path | None = None,
+    env_path: str | Path | None = None,
 ) -> ValidateResult:
-    """Core validation that returns errors and loaded artifacts."""
+    """Core validation that returns errors and loaded artifacts.
+
+    Args:
+        config_path: Path to shade.yml.
+        compose_path: Path to user's docker-compose.yml.
+        output_path: Path to generated compose file (for deployment checks).
+        env_path: Path to .env file (for env var checks).
+    """
+    from shade.verify import run_all_checks
+
     errors: list[str] = []
 
     try:
@@ -51,26 +63,44 @@ def _validate(
         errors.append(f"Failed to load docker-compose.yml: {e}")
         return ValidateResult(errors=errors, config=config)
 
-    errors.extend(validate_app_service(compose_data, config.app.name))
     errors.extend(validate_route_services(compose_data, config))
 
-    return ValidateResult(errors=errors, config=config, compose_data=compose_data)
+    # Run deployment readiness checks
+    compose_p = Path(compose_path)
+    checks = run_all_checks(
+        config=config,
+        user_compose=compose_data,
+        output_path=Path(output_path) if output_path else None,
+        env_path=Path(env_path) if env_path else compose_p.parent / ".env",
+        compose_path=compose_p,
+    )
+
+    return ValidateResult(
+        errors=errors, config=config, compose_data=compose_data, checks=checks
+    )
 
 
 def validate(
     config_path: str | Path = "shade.yml",
     compose_path: str | Path = "docker-compose.yml",
-) -> list[str]:
-    """Validate a Shade project configuration.
+    output_path: str | Path | None = None,
+    env_path: str | Path | None = None,
+) -> ValidateResult:
+    """Validate a Shade project configuration with deployment readiness checks.
 
     Args:
         config_path: Path to shade.yml.
         compose_path: Path to user's docker-compose.yml.
+        output_path: Path to generated compose file (for deployment checks).
+        env_path: Path to .env file (for env var checks).
 
     Returns:
-        List of error messages (empty = valid).
+        ValidateResult with errors and deployment warnings.
     """
-    return _validate(config_path, compose_path).errors
+    return _validate(
+        config_path, compose_path, output_path=output_path,
+        env_path=env_path,
+    )
 
 
 def build(

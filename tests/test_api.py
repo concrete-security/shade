@@ -37,13 +37,14 @@ class TestValidate:
                 "services": {"my-app": {"image": "python:3.11"}},
             },
         )
-        errors = validate(
+        result = validate(
             config_path=d / "shade.yml",
             compose_path=d / "docker-compose.yml",
         )
-        assert errors == []
+        assert result.errors == []
+        assert result.checks is not None
 
-    def test_missing_app_service(self, project_dir):
+    def test_missing_app_service_no_error(self, project_dir):
         d = project_dir(
             shade_config={
                 "app": {"name": "my-app"},
@@ -53,28 +54,48 @@ class TestValidate:
                 "services": {"other-app": {"image": "python:3.11"}},
             },
         )
-        errors = validate(
+        result = validate(
             config_path=d / "shade.yml",
             compose_path=d / "docker-compose.yml",
         )
-        assert any("my-app" in e for e in errors)
+        # App service check removed — compose is trusted as-is
+        assert result.errors == []
 
     def test_missing_config_file(self, tmp_path):
-        errors = validate(
+        result = validate(
             config_path=tmp_path / "nonexistent.yml",
             compose_path=tmp_path / "docker-compose.yml",
         )
-        assert len(errors) > 0
+        assert len(result.errors) > 0
 
     def test_missing_compose_file(self, tmp_path):
         shade_yml = tmp_path / "shade.yml"
         with open(shade_yml, "w") as f:
             yaml.dump({"app": {"name": "my-app"}, "cvm": {"domain": "example.com"}}, f)
-        errors = validate(
+        result = validate(
             config_path=shade_yml,
             compose_path=tmp_path / "nonexistent.yml",
         )
-        assert any("docker-compose.yml" in e for e in errors)
+        assert any("docker-compose.yml" in e for e in result.errors)
+
+    def test_validate_returns_warnings(self, project_dir):
+        d = project_dir(
+            shade_config={
+                "app": {"name": "my-app"},
+                "cvm": {"domain": "example.com"},
+            },
+            compose={
+                "services": {"my-app": {"image": "python:3.11"}},
+            },
+        )
+        result = validate(
+            config_path=d / "shade.yml",
+            compose_path=d / "docker-compose.yml",
+        )
+        assert result.errors == []
+        assert isinstance(result.checks, list)
+        # Should have at least image pinning warning (python:3.11 not pinned)
+        assert any(not c.passed and "not pinned" in c.message for c in result.checks)
 
 
 class TestBuild:
@@ -131,10 +152,13 @@ class TestBuild:
         d = project_dir(
             shade_config={
                 "app": {"name": "my-app"},
-                "cvm": {"domain": "example.com"},
+                "cvm": {
+                    "domain": "example.com",
+                    "routes": [{"path": "/api", "service": "missing-svc", "port": 8000}],
+                },
             },
             compose={
-                "services": {"wrong-name": {"image": "python:3.11"}},
+                "services": {"my-app": {"image": "python:3.11"}},
             },
         )
         with pytest.raises(ValueError, match="Validation failed"):

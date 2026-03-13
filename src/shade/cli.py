@@ -46,16 +46,35 @@ def build(config: str, compose: str, output: str):
 @click.option(
     "--compose", "-f", default="docker-compose.yml", help="Path to user docker-compose.yml."
 )
-def validate(config: str, compose: str):
-    """Validate the Shade configuration."""
-    errors = api.validate(config_path=config, compose_path=compose)
-    if errors:
-        click.echo("Validation errors:", err=True)
-        for error in errors:
-            click.echo(f"  - {error}", err=True)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Path to generated compose file (for deployment checks).",
+)
+@click.option("--env", "-e", default=None, help="Path to .env file.")
+def validate(config: str, compose: str, output: str | None, env: str | None):
+    """Validate the Shade configuration with deployment readiness checks."""
+    result = api.validate(
+        config_path=config,
+        compose_path=compose,
+        output_path=output,
+        env_path=env,
+    )
+    if result.errors:
+        click.echo("❌ shade.yml and docker-compose.yml are inconsistent", err=True)
+        for error in result.errors:
+            click.echo(f"  ✗ {error}", err=True)
         sys.exit(1)
     else:
-        click.echo("Configuration is valid.")
+        click.echo("✅ shade.yml and docker-compose.yml are consistent")
+
+    if result.checks:
+        click.echo()
+        click.echo("Deployment readiness:")
+        for check in result.checks:
+            icon = "✅" if check.passed else "❌"
+            click.echo(f"  {icon} {check.message}")
 
 
 @cli.command()
