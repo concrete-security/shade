@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from shade.api import build, init, validate
+from shade.api import build, env_list, init, validate
 
 
 @pytest.fixture
@@ -187,3 +187,36 @@ class TestInit:
         (tmp_path / "shade.yml").write_text("existing")
         with pytest.raises(FileExistsError):
             init(output_dir=tmp_path)
+
+
+class TestEnvList:
+    """Test the env_list API."""
+
+    def test_env_list_dict_format(self, tmp_path):
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(yaml.dump(
+            {"services": {"app": {"environment": {"PORT": "8000", "HOST": "0.0.0.0"}}}}
+        ))
+        result = env_list(output_path=compose)
+        assert result == ["HOST", "PORT"]
+
+    def test_env_list_list_format(self, tmp_path):
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(yaml.dump(
+            {"services": {"app": {"environment": ["PORT=8000", "HOST=0.0.0.0"]}}}
+        ))
+        result = env_list(output_path=compose)
+        assert result == ["HOST", "PORT"]
+
+    def test_env_list_missing_file(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            env_list(output_path=tmp_path / "nonexistent.yml")
+
+    def test_env_list_auto_detect(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(yaml.dump(
+            {"services": {"app": {"environment": {"KEY": "val"}}}}
+        ))
+        result = env_list()
+        assert result == ["KEY"]

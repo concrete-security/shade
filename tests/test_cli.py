@@ -182,3 +182,33 @@ class TestInitCommand:
         result = runner.invoke(cli, ["init", "-d", str(tmp_path)])
         assert result.exit_code == 1
         assert "Error" in result.output
+
+
+class TestEnvListCommand:
+    """Test the 'shade env-list' CLI command."""
+
+    def test_env_list_plain(self, tmp_path):
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(yaml.dump(
+            {"services": {"app": {"environment": ["PORT=8000", "HOST=0.0.0.0"]}}}
+        ))
+        runner = CliRunner()
+        result = runner.invoke(cli, ["env-list", "-o", str(compose)])
+        assert result.exit_code == 0
+        assert "HOST" in result.output
+        assert "PORT" in result.output
+
+    def test_env_list_json(self, tmp_path):
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(yaml.dump(
+            {"services": {"app": {"environment": ["KEY=val"]}}}
+        ))
+        runner = CliRunner()
+        result = runner.invoke(cli, ["env-list", "--json", "-o", str(compose)])
+        assert result.exit_code == 0
+        assert '["KEY"]' in result.output
+
+    def test_env_list_missing_file(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["env-list", "-o", str(tmp_path / "nope.yml")])
+        assert result.exit_code != 0

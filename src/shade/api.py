@@ -67,10 +67,18 @@ def _validate(
 
     # Run deployment readiness checks
     compose_p = Path(compose_path)
+
+    # Auto-detect generated compose if not explicitly provided
+    if output_path:
+        resolved_output = Path(output_path)
+    else:
+        default_output = compose_p.parent / "docker-compose.shade.yml"
+        resolved_output = default_output if default_output.exists() else None
+
     checks = run_all_checks(
         config=config,
         user_compose=compose_data,
-        output_path=Path(output_path) if output_path else None,
+        output_path=resolved_output,
         env_path=Path(env_path) if env_path else compose_p.parent / ".env",
         compose_path=compose_p,
     )
@@ -146,6 +154,33 @@ def build(
         networks_count=len(result["networks"]),
         routes_count=len(config.cvm.routes),
     )
+
+
+def env_list(output_path: str | Path | None = None) -> list[str]:
+    """List environment variable names from the generated compose.
+
+    Args:
+        output_path: Path to generated compose file. Auto-detects docker-compose.shade.yml if None.
+
+    Returns:
+        Sorted list of env var names.
+    """
+    if output_path:
+        path = Path(output_path)
+    else:
+        path = Path("docker-compose.shade.yml")
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Generated compose not found at {path}: run 'shade build' first"
+        )
+
+    with open(path) as f:
+        data = yaml.safe_load(f)
+
+    from shade.verify import extract_env_var_names
+
+    return sorted(extract_env_var_names(data))
 
 
 def init(output_dir: str | Path = ".") -> Path:

@@ -164,21 +164,26 @@ def check_dstack_socket_mounted(output_path: Path) -> list[CheckResult]:
     ]
 
 
-def check_allowed_envs(output_path: Path) -> list[CheckResult]:
-    """List environment variables from generated compose for Phala allowed_envs."""
-    data = _load_yaml_file(output_path)
-    if data is None:
-        return []
+def extract_env_var_names(compose_data: dict) -> set[str]:
+    """Extract environment variable names from a parsed compose dict."""
     env_vars: set[str] = set()
-    services = data.get("services", {})
-    for svc in services.values():
+    for svc in compose_data.get("services", {}).values():
         env = svc.get("environment", {})
         if isinstance(env, dict):
             env_vars.update(env.keys())
         elif isinstance(env, list):
             for item in env:
-                if "=" in item:
-                    env_vars.add(item.split("=", 1)[0])
+                if "=" in str(item):
+                    env_vars.add(str(item).split("=", 1)[0])
+    return env_vars
+
+
+def check_allowed_envs(output_path: Path) -> list[CheckResult]:
+    """List environment variables from generated compose for Phala allowed_envs."""
+    data = _load_yaml_file(output_path)
+    if data is None:
+        return []
+    env_vars = extract_env_var_names(data)
     if env_vars:
         sorted_vars = sorted(env_vars)
         return [

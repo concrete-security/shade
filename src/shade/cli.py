@@ -3,6 +3,7 @@
 Command-line interface for the Shade CVM framework.
 """
 
+import json
 import sys
 
 import click
@@ -75,6 +76,28 @@ def validate(config: str, compose: str, output: str | None, env: str | None):
         for check in result.checks:
             icon = "✅" if check.passed else "❌"
             click.echo(f"  {icon} {check.message}")
+
+
+@cli.command("env-list")
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Path to generated compose file.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON array.")
+def env_list(output: str | None, as_json: bool):
+    """List environment variable names from the generated compose."""
+    try:
+        env_vars = api.env_list(output_path=output)
+    except FileNotFoundError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+    if as_json:
+        click.echo(json.dumps(env_vars))
+    else:
+        for var in env_vars:
+            click.echo(var)
 
 
 @cli.command()

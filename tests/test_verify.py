@@ -78,6 +78,21 @@ class TestCheckImagesResolvable:
             assert len(failed) > 0
             assert all("auth required" in r.message for r in failed)
 
+    def test_image_docker_not_found(self):
+        config = _make_config()
+        with patch("shade.verify.subprocess.run", side_effect=FileNotFoundError):
+            results = check_images_resolvable(config)
+            failed = _failed(results)
+            assert len(failed) > 0
+            assert all("Cannot check" in r.message for r in failed)
+
+    def test_image_timeout(self):
+        config = _make_config()
+        with patch("shade.verify.subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 30)):
+            results = check_images_resolvable(config)
+            failed = _failed(results)
+            assert len(failed) > 0
+
 
 class TestCheckDomainResolves:
     """Test domain DNS resolution check."""
@@ -148,6 +163,14 @@ class TestCheckGeneratedComposeNoDevMode:
         assert len(failed) == 1
         assert "not found" in failed[0].message
 
+    def test_invalid_yaml(self, tmp_path):
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(": invalid: yaml: {{")
+        results = check_generated_compose_no_dev_mode(compose)
+        failed = _failed(results)
+        assert len(failed) == 1
+        assert "not found" in failed[0].message
+
 
 class TestCheckNoBuildContexts:
     """Test build context detection."""
@@ -182,6 +205,18 @@ class TestCheckDstackSocketMounted:
             "services": {
                 "attestation": {
                     "volumes": ["/var/run/dstack.sock:/var/run/dstack.sock"],
+                },
+            },
+        })
+        results = check_dstack_socket_mounted(compose)
+        assert _all_passed(results)
+
+    def test_socket_mounted_dict_style(self, tmp_path):
+        compose = tmp_path / "compose.yml"
+        _write_yaml(compose, {
+            "services": {
+                "attestation": {
+                    "volumes": [{"source": "/var/run/dstack.sock", "target": "/var/run/dstack.sock"}],
                 },
             },
         })
