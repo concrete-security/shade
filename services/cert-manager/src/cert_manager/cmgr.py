@@ -46,6 +46,7 @@ class CertificateManager:
         cert_path: str = "/etc/nginx/ssl",
         acme_path: str = "/acme-challenge/",
         force_rm_cert_files: bool = False,
+        skip_letsencrypt: bool = False,
     ):
         self.domain = domain
         self.dev_mode = dev_mode
@@ -53,6 +54,7 @@ class CertificateManager:
         self.letsencrypt_staging = letsencrypt_staging
         # used to easily switch to another account
         self.letsencrypt_account_version = letsencrypt_account_version
+        self.skip_letsencrypt = skip_letsencrypt
         self.supervisor = Supervisor()
 
         self.cert_path = Path(cert_path)
@@ -139,12 +141,15 @@ class CertificateManager:
         )
 
         # Create Certificate Signing Request with our deterministic private key
+        # X.509 CN is limited to 64 characters; long domains (e.g. Phala CVM)
+        # are truncated in CN and carried in full via SAN (no length limit).
+        cn_value = self.domain if len(self.domain) <= 64 else self.domain[:64]
         csr = (
             x509.CertificateSigningRequestBuilder()
             .subject_name(
                 x509.Name(
                     [
-                        x509.NameAttribute(NameOID.COMMON_NAME, self.domain),
+                        x509.NameAttribute(NameOID.COMMON_NAME, cn_value),
                     ]
                 )
             )
@@ -200,10 +205,12 @@ class CertificateManager:
         logger.info("Creating self-signed certificate for development")
 
         # Create certificate
+        # X.509 CN is limited to 64 characters; truncate for long domains.
+        cn_value = self.domain if len(self.domain) <= 64 else self.domain[:64]
         subject = issuer = x509.Name(
             [
                 x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Concrete Security"),
-                x509.NameAttribute(NameOID.COMMON_NAME, self.domain),
+                x509.NameAttribute(NameOID.COMMON_NAME, cn_value),
             ]
         )
 
@@ -458,12 +465,22 @@ class CertificateManager:
             private_key = self.generate_deterministic_key(f"cert/debug/{self.domain}/v1")
             cert_chain = self.create_self_signed_cert(private_key)
             self.save_certificate_and_key(cert_chain, private_key)
+        elif self.skip_letsencrypt:  # TEE self-signed mode: skip LE, use TEE-derived keys
+            logger.info(
+                "SKIP_LETSENCRYPT is set — using TEE-derived self-signed certificate. "
+                "Clients must verify trust via TDX attestation (aTLS)."
+            )
+            private_key = self.generate_deterministic_key(
+                f"cert/tee-self-signed/{self.domain}/v1"
+            )
+            cert_chain = self.create_self_signed_cert(private_key)
+            self.save_certificate_and_key(cert_chain, private_key)
         # TODO: sync using S3 bucket for multiple replicas (in production)
         # We should have a lock file, then only one will push its generated cert, Others
         # will download it.
         # For now, we assume single instance.
         # See https://aws.amazon.com/about-aws/whats-new/2024/08/amazon-s3-conditional-writes/
-        else:  # Production mode: use Let's Encrypt
+        else:  # Production mode: use Let's Encrypt, fall back to TEE self-signed
             # TODO: maybe add seed into the S3 bucket for more randomness and key rotation on every
             # cert renewal
             private_key = self.generate_deterministic_key(f"cert/letsencrypt/{self.domain}/v1")
@@ -484,8 +501,16 @@ class CertificateManager:
                         i += 1
                         wait_time *= 2
                     else:
-                        logger.error("Max retries reached, giving up.")
-                        raise
+                        logger.warning(
+                            "Let's Encrypt failed after retries. "
+                            "Falling back to self-signed certificate from TEE-derived keys. "
+                            "Clients must verify trust via TDX attestation (aTLS)."
+                        )
+                        private_key = self.generate_deterministic_key(
+                            f"cert/tee-self-signed/{self.domain}/v1"
+                        )
+                        cert_chain = self.create_self_signed_cert(private_key)
+                        success = True
 
             self.save_certificate_and_key(cert_chain, private_key)
 
@@ -524,9 +549,17 @@ class CertificateManager:
         except Exception as e:
             logger.error(f"Failed to force delete certificate files: {e}")
 
-        # If in production (or staging), delete any existing self-signed certificate
+        # If in production with a routable domain and LE is enabled, delete any
+        # existing self-signed certificate so Let's Encrypt can replace it. Skip
+        # deletion when skip_letsencrypt is set (self-signed is the intended cert),
+        # for localhost, or non-routable domains.
         try:
-            if not self.dev_mode and self.is_cert_self_signed():
+            if (
+                not self.dev_mode
+                and not self.skip_letsencrypt
+                and self.is_cert_self_signed()
+                and self.domain not in ("localhost", "127.0.0.1")
+            ):
                 logger.info("Found self-signed certificate in production mode, deleting it")
                 self.delete_certificate_files()
         except Exception as e:

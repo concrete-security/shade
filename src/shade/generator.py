@@ -57,7 +57,10 @@ def _render_locations(config: ShadeConfig) -> str:
             lines.append("${CORS_HEADERS}")
 
         # Proxy configuration
-        lines.append(f"        proxy_pass http://{upstream};")
+        if route.strip_prefix and route.path != "/":
+            lines.append(f"        proxy_pass http://{upstream}/;")
+        else:
+            lines.append(f"        proxy_pass http://{upstream};")
 
         # WebSocket support (opt-in per route)
         if route.websocket:
@@ -67,10 +70,17 @@ def _render_locations(config: ShadeConfig) -> str:
             lines.append("        proxy_read_timeout 3600s;")
             lines.append("        proxy_send_timeout 3600s;")
 
+        # Allow iframe embedding (strip upstream frame-blocking headers)
+        if route.allow_iframe:
+            lines.append("        proxy_hide_header X-Frame-Options;")
+            lines.append("        proxy_hide_header Content-Security-Policy;")
+
         lines.append("        proxy_set_header Host $host;")
         lines.append("        proxy_set_header X-Real-IP $remote_addr;")
         lines.append("        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;")
         lines.append("        proxy_set_header X-Forwarded-Proto $scheme;")
+        if route.forward_tls_ekm:
+            lines.append("        proxy_set_header X-TLS-EKM-Channel-Binding $ekm_channel_binding;")
         lines.append("    }")
 
         blocks.append("\n".join(lines))
@@ -160,6 +170,7 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         f"CORS_ORIGINS={cors_origins_escaped}",
         f"AUTH_ENABLED={'true' if config.plugins.auth.enabled else 'false'}",
         "DEV_MODE=false",
+        f"SKIP_LETSENCRYPT={'true' if config.cvm.tls.mode == 'self-signed' else 'false'}",
         f"LETSENCRYPT_STAGING={'true' if config.cvm.tls.letsencrypt_staging else 'false'}",
         f"LETSENCRYPT_ACCOUNT_VERSION={config.cvm.tls.letsencrypt_account_version}",
         "FORCE_RM_CERT_FILES=false",
@@ -192,7 +203,7 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         "environment": [
             "HOST=0.0.0.0",
             "PORT=8080",
-            "WORKERS=8",
+            "WORKERS=1",
         ],
         "volumes": ["/var/run/dstack.sock:/var/run/dstack.sock"],
         "expose": ["8080"],

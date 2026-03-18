@@ -32,6 +32,7 @@ if __name__ == "__main__":
     letsencrypt_account_version = os.getenv("LETSENCRYPT_ACCOUNT_VERSION", "v1")
 
     force_rm_cert_files = os.getenv("FORCE_RM_CERT_FILES", "false").lower() == "true"
+    skip_letsencrypt = os.getenv("SKIP_LETSENCRYPT", "false").lower() == "true"
 
     manager = CertificateManager(
         domain=domain,
@@ -40,6 +41,7 @@ if __name__ == "__main__":
         letsencrypt_staging=letsencrypt_staging,
         letsencrypt_account_version=letsencrypt_account_version,
         force_rm_cert_files=force_rm_cert_files,
+        skip_letsencrypt=skip_letsencrypt,
     )
     try:
         manager.run()

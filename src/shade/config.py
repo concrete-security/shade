@@ -37,6 +37,9 @@ class RouteConfig(BaseModel):
     auth_required: bool = False  # requires auth plugin enabled
     cors: bool = True  # inherit CORS settings
     websocket: bool = False  # opt-in WebSocket upgrade proxying
+    strip_prefix: bool = False  # strip location prefix before proxying to upstream
+    allow_iframe: bool = False  # strip upstream frame-ancestors/X-Frame-Options to allow embedding
+    forward_tls_ekm: bool = False  # inject signed TLS EKM header for sender-constrained routes
 
     @field_validator("path")
     @classmethod
@@ -65,8 +68,16 @@ class CorsConfig(BaseModel):
 
 
 class TlsConfig(BaseModel):
-    """TLS configuration."""
+    """TLS configuration.
 
+    mode: "letsencrypt" (default) or "self-signed".
+      - letsencrypt: obtain a Let's Encrypt certificate (falls back to
+        TEE-derived self-signed on failure).
+      - self-signed: use a TEE-derived self-signed certificate directly.
+        Clients verify trust via TDX attestation (aTLS).
+    """
+
+    mode: str = "letsencrypt"
     letsencrypt_staging: bool = False
     letsencrypt_account_version: str = "v1"
 
