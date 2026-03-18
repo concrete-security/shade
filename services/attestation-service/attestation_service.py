@@ -7,8 +7,10 @@ Provides TDX attestation endpoints using the dstack_sdk.
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import os
+import struct
 import secrets
 import time
 import tomllib
@@ -179,6 +181,58 @@ async def health_check():
     return HealthResponse(status="healthy", service="attestation-service")
 
 
+DSTACK_RUNTIME_EVENT_TYPE = 0x08000001
+_EVENT_TYPE_LE = struct.pack("<I", DSTACK_RUNTIME_EVENT_TYPE)
+
+
+def _compute_runtime_event_digest(event_name: str, payload_bytes: bytes) -> str:
+    """Compute SHA-384 digest for a dstack runtime event.
+
+    Algorithm (from dstack cc-eventlog/src/runtime_events.rs):
+        SHA384(event_type_le_u32 || ":" || event_name_utf8 || ":" || payload_raw)
+    """
+    h = hashlib.sha384()
+    h.update(_EVENT_TYPE_LE)
+    h.update(b":")
+    h.update(event_name.encode("utf-8"))
+    h.update(b":")
+    h.update(payload_bytes)
+    return h.hexdigest()
+
+
+def _backfill_event_log_digests(quote: GetQuoteResponse) -> None:
+    """Fill in empty digests in the event log returned by dstack >= 0.5.7.
+
+    The dstack daemon stores runtime event digests lazily — the digest field is
+    empty in the serialised event log but can be recomputed from the event name
+    and payload.  Verifiers (atlas WASM) need the digests for RTMR replay.
+    """
+    if not hasattr(quote, "event_log") or not quote.event_log:
+        return
+    try:
+        events = json.loads(quote.event_log)
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    modified = False
+    for event in events:
+        if event.get("event_type") != DSTACK_RUNTIME_EVENT_TYPE:
+            continue
+        if event.get("digest"):
+            continue
+        event_name = event.get("event", "")
+        payload_hex = event.get("event_payload", "")
+        try:
+            payload_bytes = bytes.fromhex(payload_hex) if payload_hex else b""
+        except ValueError:
+            payload_bytes = payload_hex.encode("utf-8") if payload_hex else b""
+        event["digest"] = _compute_runtime_event_digest(event_name, payload_bytes)
+        modified = True
+
+    if modified:
+        quote.event_log = json.dumps(events)
+
+
 @app.post("/tdx_quote", response_model=QuoteResponse)
 async def post_tdx_quote(request: Request, data: QuoteRequest):
     """
@@ -253,6 +307,8 @@ async def post_tdx_quote(request: Request, data: QuoteRequest):
                 "quote_type": "tdx",
             },
         )
+
+    _backfill_event_log_digests(quote)
 
     return QuoteResponse(
         success=True,
