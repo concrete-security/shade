@@ -10,8 +10,8 @@ server {
     # we want the attestation and following requests
     # to be part of the same TCP connection. This doesn't
     # enforce it, but it makes it possible.
-    keepalive_timeout 60;
-    keepalive_requests 100;
+    keepalive_timeout 1800;
+    keepalive_requests 10000;
 
     # SSL certificate (can be fullchain) and key
     ssl_certificate /etc/nginx/ssl/cert.pem;
