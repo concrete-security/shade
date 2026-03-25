@@ -1,10 +1,13 @@
 """Tests for shade.generator module."""
 
+import pytest
+
 from shade.config import (
     AppRef,
     AuthPlugin,
     CorsConfig,
     CvmConfig,
+    NginxConfig,
     PluginsConfig,
     RouteConfig,
     ServiceRef,
@@ -381,6 +384,48 @@ class TestGenerateCors:
         nginx_env = result["services"]["nginx-cert-manager"]["environment"]
         cors_env = [e for e in nginx_env if e.startswith("CORS_ORIGINS=")][0]
         assert cors_env == "CORS_ORIGINS=[]"
+
+
+class TestGenerateNginxMaxBodySize:
+    """Test nginx max_body_size configuration."""
+
+    def test_max_body_size_in_env(self):
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            cvm=CvmConfig(domain="example.com", nginx=NginxConfig(max_body_size="10G")),
+        )
+        result = generate(config, _minimal_compose())
+        nginx_env = result["services"]["nginx-cert-manager"]["environment"]
+        assert "NGINX_MAX_BODY_SIZE=10G" in nginx_env
+
+    def test_no_max_body_size_by_default(self):
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            cvm=CvmConfig(domain="example.com"),
+        )
+        result = generate(config, _minimal_compose())
+        nginx_env = result["services"]["nginx-cert-manager"]["environment"]
+        env_keys = [e.split("=", 1)[0] for e in nginx_env]
+        assert "NGINX_MAX_BODY_SIZE" not in env_keys
+
+    @pytest.mark.parametrize("value", [
+        "10G; evil_directive",  # nginx directive injection
+        "abc",                  # no digits
+        "10 G",                 # space in value
+        "10T",                  # invalid unit
+        "",                     # empty string
+        "10g ",                 # trailing space
+    ])
+    def test_invalid_max_body_size_rejected(self, value):
+        with pytest.raises(Exception, match="invalid max_body_size"):
+            ShadeConfig(
+                app=AppRef(name="my-app"),
+                cvm=CvmConfig(
+                    domain="example.com",
+                    nginx=NginxConfig(max_body_size=value),
+                ),
+            )
+
 
 
 class TestGenerateDictNetworks:

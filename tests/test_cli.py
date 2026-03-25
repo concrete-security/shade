@@ -48,8 +48,14 @@ class TestBuildCommand:
     def test_build_validation_error(self, tmp_path):
         _setup_project(
             tmp_path,
-            shade_config={"app": {"name": "my-app"}, "cvm": {"domain": "example.com"}},
-            compose={"services": {"wrong": {"image": "python:3.11"}}},
+            shade_config={
+                "app": {"name": "my-app"},
+                "cvm": {
+                    "domain": "example.com",
+                    "routes": [{"path": "/api", "service": "missing-svc", "port": 8000}],
+                },
+            },
+            compose={"services": {"my-app": {"image": "python:3.11"}}},
         )
         runner = CliRunner()
         result = runner.invoke(
@@ -89,13 +95,39 @@ class TestValidateCommand:
             ],
         )
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        assert "consistent" in result.output
+
+    def test_validate_shows_warnings(self, tmp_path):
+        _setup_project(
+            tmp_path,
+            shade_config={"app": {"name": "my-app"}, "cvm": {"domain": "example.com"}},
+            compose={"services": {"my-app": {"image": "python:3.11"}}},
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "validate",
+                "-c",
+                str(tmp_path / "shade.yml"),
+                "-f",
+                str(tmp_path / "docker-compose.yml"),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Deployment readiness:" in result.output
 
     def test_validate_errors(self, tmp_path):
         _setup_project(
             tmp_path,
-            shade_config={"app": {"name": "my-app"}, "cvm": {"domain": "example.com"}},
-            compose={"services": {"wrong": {"image": "python:3.11"}}},
+            shade_config={
+                "app": {"name": "my-app"},
+                "cvm": {
+                    "domain": "example.com",
+                    "routes": [{"path": "/api", "service": "missing-svc", "port": 8000}],
+                },
+            },
+            compose={"services": {"my-app": {"image": "python:3.11"}}},
         )
         runner = CliRunner()
         result = runner.invoke(
@@ -109,6 +141,29 @@ class TestValidateCommand:
             ],
         )
         assert result.exit_code == 1
+
+    def test_validate_with_output_option(self, tmp_path):
+        _setup_project(
+            tmp_path,
+            shade_config={"app": {"name": "my-app"}, "cvm": {"domain": "example.com"}},
+            compose={"services": {"my-app": {"image": "python:3.11"}}},
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "validate",
+                "-c",
+                str(tmp_path / "shade.yml"),
+                "-f",
+                str(tmp_path / "docker-compose.yml"),
+                "-o",
+                str(tmp_path / "docker-compose.shade.yml"),
+                "-e",
+                str(tmp_path / ".env"),
+            ],
+        )
+        assert result.exit_code == 0
 
 
 class TestInitCommand:
@@ -127,3 +182,33 @@ class TestInitCommand:
         result = runner.invoke(cli, ["init", "-d", str(tmp_path)])
         assert result.exit_code == 1
         assert "Error" in result.output
+
+
+class TestEnvListCommand:
+    """Test the 'shade env-list' CLI command."""
+
+    def test_env_list_plain(self, tmp_path):
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(yaml.dump(
+            {"services": {"app": {"environment": ["PORT=8000", "HOST=0.0.0.0"]}}}
+        ))
+        runner = CliRunner()
+        result = runner.invoke(cli, ["env-list", "-o", str(compose)])
+        assert result.exit_code == 0
+        assert "HOST" in result.output
+        assert "PORT" in result.output
+
+    def test_env_list_json(self, tmp_path):
+        compose = tmp_path / "docker-compose.shade.yml"
+        compose.write_text(yaml.dump(
+            {"services": {"app": {"environment": ["KEY=val"]}}}
+        ))
+        runner = CliRunner()
+        result = runner.invoke(cli, ["env-list", "--json", "-o", str(compose)])
+        assert result.exit_code == 0
+        assert '["KEY"]' in result.output
+
+    def test_env_list_missing_file(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["env-list", "-o", str(tmp_path / "nope.yml")])
+        assert result.exit_code != 0
