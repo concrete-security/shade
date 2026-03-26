@@ -12,6 +12,7 @@ import yaml
 from shade.compose import load_user_compose, validate_route_services
 from shade.config import ShadeConfig, load_shade_config
 from shade.generator import generate
+from shade.policy import generate_atlas_policy as _generate_atlas_policy
 
 
 @dataclass
@@ -203,3 +204,30 @@ def init(output_dir: str | Path = ".") -> Path:
 
     shutil.copy2(template_path, target_path)
     return target_path
+
+
+def generate_atlas_policy(
+    domain: str | None = None,
+    *,
+    docker_compose_file: str | None = None,
+    allowed_tcb_status: list[str] | None = None,
+    disable_runtime_verification: bool = False,
+) -> dict:
+    """Generate an Atlas-compatible policy for a CVM deployment.
+
+    Args:
+        domain: CVM domain to fetch measurements from (required for production).
+        docker_compose_file: Local docker-compose content to verify against
+            the CVM's reported compose. Recommended for production.
+        allowed_tcb_status: Allowed TCB status values. Defaults to ["UpToDate"].
+        disable_runtime_verification: Skip runtime checks (dev only).
+
+    Returns:
+        Atlas policy dict ready for JSON serialization.
+    """
+    return _generate_atlas_policy(
+        domain=domain,
+        docker_compose_file=docker_compose_file,
+        allowed_tcb_status=allowed_tcb_status,
+        disable_runtime_verification=disable_runtime_verification,
+    )

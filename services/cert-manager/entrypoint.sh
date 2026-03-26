@@ -9,6 +9,10 @@ echo "Upstream: ${UPSTREAM_HOST:-<not set>}:${UPSTREAM_PORT:-<not set>}"
 # Render nginx configs from templates using env vars
 uv run /app/render_nginx_conf.py
 
+# Apply base config (HTTP + ACME challenge) so nginx starts ready for Let's Encrypt.
+# The cert-manager will later switch to base+HTTPS once the certificate is obtained.
+cp /app/nginx_conf/base.conf /etc/nginx/conf.d/default.conf
+
 # Derive EKM HMAC key from TEE so the operator never sees it.
 # In dev mode, use a dummy secret if not provided (no dstack socket locally).
 if [ "${DEV_MODE}" = "true" ]; then

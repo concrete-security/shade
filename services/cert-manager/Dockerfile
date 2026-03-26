@@ -61,11 +61,13 @@ RUN apk add --no-cache supervisor~=4.2
 # Create app directory
 WORKDIR /app
 
-# Install Python dependencies (uv sync needs src/)
+# Install Python dependencies (uv sync needs src/ and build tools for native deps)
 COPY pyproject.toml /app/
 COPY src/ /app/src/
 COPY uv.lock /app/
-RUN uv sync --locked --no-cache
+RUN apk add --no-cache --virtual .build-deps gcc musl-dev cargo rust && \
+    uv sync --locked --no-cache && \
+    apk del .build-deps
 
 # Copy app files
 COPY entrypoint.sh /app/
