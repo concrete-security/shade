@@ -33,6 +33,11 @@ if __name__ == "__main__":
 
     force_rm_cert_files = os.getenv("FORCE_RM_CERT_FILES", "false").lower() == "true"
 
+    # FQDN-resolution gate before calling Let's Encrypt: poll interval and max attempts.
+    # Defaults give a ~10 min window (60 * 10s) to outlast cold-start DNS propagation.
+    fqdn_resolve_wait_seconds = int(os.getenv("FQDN_RESOLVE_WAIT_SECONDS", "10"))
+    fqdn_resolve_max_tries = int(os.getenv("FQDN_RESOLVE_MAX_TRIES", "60"))
+
     manager = CertificateManager(
         domain=domain,
         dev_mode=dev_mode,
@@ -40,6 +45,8 @@ if __name__ == "__main__":
         letsencrypt_staging=letsencrypt_staging,
         letsencrypt_account_version=letsencrypt_account_version,
         force_rm_cert_files=force_rm_cert_files,
+        fqdn_resolve_wait_seconds=fqdn_resolve_wait_seconds,
+        fqdn_resolve_max_tries=fqdn_resolve_max_tries,
     )
     try:
         manager.run()

@@ -6,6 +6,7 @@ Supports multiple replicas by synchronizing them via an S3 bucket.
 """
 
 import os
+import socket
 import time
 import logging
 from hashlib import sha256
@@ -46,6 +47,8 @@ class CertificateManager:
         cert_path: str = "/etc/nginx/ssl",
         acme_path: str = "/acme-challenge/",
         force_rm_cert_files: bool = False,
+        fqdn_resolve_wait_seconds: int = 10,
+        fqdn_resolve_max_tries: int = 60,
     ):
         self.domain = domain
         self.dev_mode = dev_mode
@@ -53,6 +56,9 @@ class CertificateManager:
         self.letsencrypt_staging = letsencrypt_staging
         # used to easily switch to another account
         self.letsencrypt_account_version = letsencrypt_account_version
+        # FQDN-resolution gate before calling Let's Encrypt (see wait_for_fqdn_resolution).
+        self.fqdn_resolve_wait_seconds = fqdn_resolve_wait_seconds
+        self.fqdn_resolve_max_tries = fqdn_resolve_max_tries
         self.supervisor = Supervisor()
 
         self.cert_path = Path(cert_path)
@@ -449,6 +455,38 @@ class CertificateManager:
             dstack_client.emit_event("New TLS Certificate", cert_hash)
             logger.info("Emitted new TLS certificate event to Dstack")
 
+    def wait_for_fqdn_resolution(
+        self, *, wait_time: int | None = None, max_tries: int | None = None
+    ) -> None:
+        """Block until the container resolver can resolve the public FQDN.
+
+        ACME HTTP-01 needs Let's Encrypt to reach http://{fqdn}/.well-known/...; the
+        cert-manager boots before the CNAME exists, so calling certbot before the FQDN
+        resolves just burns failed-validation attempts (and LE rate limit). This cheap
+        local resolve check (no LE call) gates the certbot retry below so we only hit LE
+        once issuance can plausibly succeed.
+
+        Timing defaults come from the FQDN_RESOLVE_* env vars (see __init__); the keyword
+        args are an explicit override (used by tests)."""
+        wait_time = self.fqdn_resolve_wait_seconds if wait_time is None else wait_time
+        max_tries = self.fqdn_resolve_max_tries if max_tries is None else max_tries
+        for i in range(max_tries):
+            try:
+                # HTTP-01 validation hits port 80; the port is irrelevant to name
+                # resolution but we keep it consistent with how LE reaches us.
+                socket.getaddrinfo(self.domain, 80, type=socket.SOCK_STREAM)
+                logger.info(f"FQDN {self.domain} resolves; proceeding to certbot")
+                return
+            except OSError:
+                logger.info(
+                    f"FQDN {self.domain} not resolvable yet, waiting {wait_time}s... "
+                    f"(attempt {i + 1}/{max_tries})"
+                )
+                time.sleep(wait_time)
+        logger.warning(
+            f"FQDN {self.domain} still not resolvable after {max_tries} checks; attempting certbot anyway"
+        )
+
     def create_or_renew_certificate(self):
         """Create or renew TLS certificate"""
 
@@ -467,6 +505,9 @@ class CertificateManager:
             # TODO: maybe add seed into the S3 bucket for more randomness and key rotation on every
             # cert renewal
             private_key = self.generate_deterministic_key(f"cert/letsencrypt/{self.domain}/v1")
+            # Gate on FQDN resolution before calling LE: cheap local resolve poll outlasts the
+            # cold-start DNS-propagation window without burning failed-validation attempts.
+            self.wait_for_fqdn_resolution()
             # Retry logic for certbot failures
             wait_time = 10
             max_tries = 3
