@@ -10,6 +10,7 @@ External dependencies such as Dstack and Let's Encrypt are mocked.
 """
 
 import os
+import logging
 import tempfile
 import subprocess
 import pytest
@@ -643,6 +644,7 @@ class TestCertificateManager:
         mock_save.assert_called_once_with(mock_certificate, mock_private_key)
         mock_emit.assert_called_once()
 
+    @patch.object(CertificateManager, "wait_for_fqdn_resolution")
     @patch.object(CertificateManager, "generate_deterministic_key")
     @patch.object(CertificateManager, "create_lets_encrypt_cert")
     @patch.object(CertificateManager, "save_certificate_and_key")
@@ -653,6 +655,7 @@ class TestCertificateManager:
         mock_save,
         mock_create_le,
         mock_gen_key,
+        mock_wait,
         temp_dir,
         mock_private_key,
         mock_letsencrypt_prod_cert,
@@ -670,6 +673,7 @@ class TestCertificateManager:
         mock_save.assert_called_once_with(mock_letsencrypt_prod_cert, mock_private_key)
         mock_emit.assert_called_once()
 
+    @patch.object(CertificateManager, "wait_for_fqdn_resolution")
     @patch.object(CertificateManager, "generate_deterministic_key")
     @patch.object(CertificateManager, "create_lets_encrypt_cert")
     @patch.object(CertificateManager, "save_certificate_and_key")
@@ -682,6 +686,7 @@ class TestCertificateManager:
         mock_save,
         mock_create_le,
         mock_gen_key,
+        mock_wait,
         temp_dir,
         mock_private_key,
         mock_letsencrypt_prod_cert,
@@ -705,11 +710,12 @@ class TestCertificateManager:
         mock_save.assert_called_once()
         mock_emit.assert_called_once()
 
+    @patch.object(CertificateManager, "wait_for_fqdn_resolution")
     @patch.object(CertificateManager, "generate_deterministic_key")
     @patch.object(CertificateManager, "create_lets_encrypt_cert")
     @patch("time.sleep")
     def test_create_or_renew_certificate_production_max_retries(
-        self, mock_sleep, mock_create_le, mock_gen_key, temp_dir, mock_private_key
+        self, mock_sleep, mock_create_le, mock_gen_key, mock_wait, temp_dir, mock_private_key
     ):
         """Test certificate creation/renewal with max retries exceeded."""
         mock_gen_key.return_value = mock_private_key
@@ -722,6 +728,129 @@ class TestCertificateManager:
 
         assert mock_create_le.call_count == 4  # Initial + 3 retries
         assert mock_sleep.call_count == 3  # 3 retries
+
+    @patch.object(CertificateManager, "emit_new_cert_event")
+    @patch.object(CertificateManager, "save_certificate_and_key")
+    @patch.object(CertificateManager, "create_lets_encrypt_cert")
+    @patch.object(CertificateManager, "generate_deterministic_key")
+    @patch("cert_manager.cmgr.socket.getaddrinfo")
+    @patch("time.sleep")
+    def test_create_or_renew_certificate_waits_for_fqdn_before_letsencrypt(
+        self,
+        mock_sleep,
+        mock_getaddrinfo,
+        mock_gen_key,
+        mock_create_le,
+        mock_save,
+        mock_emit,
+        temp_dir,
+        mock_private_key,
+        mock_letsencrypt_prod_cert,
+    ):
+        """Cert-manager must NOT call Let's Encrypt until the FQDN resolves.
+
+        getaddrinfo is polled (sleeping between attempts) while it fails, and
+        create_lets_encrypt_cert is only invoked after a successful resolution — so a
+        cert-manager that boots before its CNAME exists doesn't burn LE attempts.
+        """
+        mock_gen_key.return_value = mock_private_key
+        mock_create_le.return_value = mock_letsencrypt_prod_cert
+        # FQDN unresolvable on the first two polls, then resolves.
+        mock_getaddrinfo.side_effect = [
+            OSError("Name or service not known"),
+            OSError("Name or service not known"),
+            [(2, 1, 6, "", ("203.0.113.10", 443))],
+        ]
+        # Record the relative order of resolution checks vs the LE call.
+        order = Mock()
+        order.attach_mock(mock_getaddrinfo, "resolve")
+        order.attach_mock(mock_create_le, "letsencrypt")
+
+        manager = create_cert_manager(temp_dir, dev_mode=False)
+        manager.create_or_renew_certificate()
+
+        assert mock_getaddrinfo.call_count == 3  # 2 failed polls + 1 success
+        assert mock_sleep.call_count == 2  # slept between the 2 failed polls
+        mock_create_le.assert_called_once()  # LE issued exactly once
+        # LE was reached only AFTER resolution succeeded.
+        assert [c[0] for c in order.mock_calls] == [
+            "resolve",
+            "resolve",
+            "resolve",
+            "letsencrypt",
+        ]
+
+    @patch.object(CertificateManager, "emit_new_cert_event")
+    @patch.object(CertificateManager, "save_certificate_and_key")
+    @patch.object(CertificateManager, "create_lets_encrypt_cert")
+    @patch.object(CertificateManager, "generate_deterministic_key")
+    @patch("cert_manager.cmgr.socket.getaddrinfo")
+    @patch("time.sleep")
+    def test_create_or_renew_certificate_no_wait_when_fqdn_already_resolves(
+        self,
+        mock_sleep,
+        mock_getaddrinfo,
+        mock_gen_key,
+        mock_create_le,
+        mock_save,
+        mock_emit,
+        temp_dir,
+        mock_private_key,
+        mock_letsencrypt_prod_cert,
+    ):
+        """When the FQDN already resolves, the gate passes on the first check: no sleep,
+        and Let's Encrypt is called immediately."""
+        mock_gen_key.return_value = mock_private_key
+        mock_create_le.return_value = mock_letsencrypt_prod_cert
+        mock_getaddrinfo.return_value = [(2, 1, 6, "", ("203.0.113.10", 443))]
+
+        manager = create_cert_manager(temp_dir, dev_mode=False)
+        manager.create_or_renew_certificate()
+
+        assert mock_getaddrinfo.call_count == 1  # resolved on the first check
+        mock_sleep.assert_not_called()  # no waiting
+        mock_create_le.assert_called_once()
+
+    @patch.object(CertificateManager, "emit_new_cert_event")
+    @patch.object(CertificateManager, "save_certificate_and_key")
+    @patch.object(CertificateManager, "create_lets_encrypt_cert")
+    @patch.object(CertificateManager, "generate_deterministic_key")
+    @patch("cert_manager.cmgr.socket.getaddrinfo")
+    @patch("time.sleep")
+    def test_create_or_renew_certificate_proceeds_after_fqdn_resolution_times_out(
+        self,
+        mock_sleep,
+        mock_getaddrinfo,
+        mock_gen_key,
+        mock_create_le,
+        mock_save,
+        mock_emit,
+        temp_dir,
+        mock_private_key,
+        mock_letsencrypt_prod_cert,
+        caplog,
+    ):
+        """If the FQDN never resolves, the gate gives up after max_tries (logging a
+        warning) and still attempts certbot — a misconfigured DNS must not wedge the
+        cert-manager forever, it should fail fast on the LE attempt instead."""
+        mock_gen_key.return_value = mock_private_key
+        mock_create_le.return_value = mock_letsencrypt_prod_cert
+        # FQDN never resolves.
+        mock_getaddrinfo.side_effect = OSError("Name or service not known")
+
+        manager = create_cert_manager(temp_dir, dev_mode=False)
+        # Bound the gate so the test stays fast (sleep is mocked anyway).
+        manager.fqdn_resolve_max_tries = 3
+
+        with caplog.at_level(logging.WARNING):
+            manager.create_or_renew_certificate()
+
+        assert mock_getaddrinfo.call_count == 3  # polled exactly max_tries times
+        assert mock_sleep.call_count == 3  # slept after each failed poll
+        assert any(
+            "still not resolvable" in r.message for r in caplog.records
+        )  # gave up with a warning
+        mock_create_le.assert_called_once()  # but still attempted certbot
 
 
 # Supervisor Tests

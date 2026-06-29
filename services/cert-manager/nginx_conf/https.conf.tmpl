@@ -1,3 +1,8 @@
+# App upstreams — defined alongside the HTTPS config that proxies to them (not in the
+# phase-1 ACME-bootstrap base.conf), so cert issuance over HTTP-01 never depends on the
+# app upstream being resolvable. https.conf is only activated once the cert exists.
+${EXTRA_UPSTREAMS}
+
 # HTTPS server
 server {
     listen 443 ssl http2;

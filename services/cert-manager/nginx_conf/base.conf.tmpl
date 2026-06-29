@@ -3,8 +3,6 @@ map $http_upgrade $connection_upgrade {
     ''      close;
 }
 
-${EXTRA_UPSTREAMS}
-
 # HTTP server only for redirects
 server {
     listen 80;
