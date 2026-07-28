@@ -13,6 +13,7 @@ import os
 import tempfile
 import subprocess
 import pytest
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import Mock, patch, mock_open
 from datetime import datetime, timedelta, timezone
@@ -146,7 +147,12 @@ def expired_certificate(mock_private_key):
     return cert
 
 
-def create_cert_manager(temp_cert_dir, dev_mode=True, letsencrypt_staging=True):
+def _fake_cert_event(cert_hash: str):
+    """Build a dstack event-log entry as the guest reports it (hex-encoded payload)."""
+    return Mock(event="New TLS Certificate", event_payload=cert_hash.encode().hex())
+
+
+def create_cert_manager(temp_cert_dir, dev_mode=True, letsencrypt_staging=True, frozen_cert=False):
     """Helper function to create a CertificateManager instance for testing."""
     manager = CertificateManager(
         domain="test.example.com",
@@ -154,6 +160,7 @@ def create_cert_manager(temp_cert_dir, dev_mode=True, letsencrypt_staging=True):
         cert_email="test@example.com",
         letsencrypt_staging=letsencrypt_staging,
         letsencrypt_account_version="v1",
+        frozen_cert=frozen_cert,
         cert_path=temp_cert_dir,
         acme_path=temp_cert_dir / "acme",
     )
@@ -247,17 +254,25 @@ class TestCertificateManager:
         assert isinstance(private_key, ec.EllipticCurvePrivateKey)
         mock_get_material.assert_called_once_with("test-path")
 
-    def test_create_self_signed_cert(self, temp_dir, mock_private_key):
-        """Test self-signed certificate creation."""
+    @pytest.mark.parametrize(
+        "kwargs, expected_days",
+        [({}, 365), ({"validity_days": 36500}, 36500)],
+        ids=["default-validity", "frozen-validity"],
+    )
+    def test_create_self_signed_cert(self, temp_dir, mock_private_key, kwargs, expected_days):
+        """Test self-signed certificate creation, with the default and a frozen lifetime."""
         manager = create_cert_manager(temp_dir)
 
-        cert_chain = manager.create_self_signed_cert(mock_private_key)
+        cert_chain = manager.create_self_signed_cert(mock_private_key, **kwargs)
 
         assert isinstance(cert_chain, list)
         assert len(cert_chain) == 1
         cert = cert_chain[0]
         assert isinstance(cert, x509.Certificate)
         assert cert.subject == cert.issuer  # Self-signed
+
+        lifetime = cert.not_valid_after_utc - cert.not_valid_before_utc
+        assert abs(lifetime.days - expected_days) <= 1
 
         # Check domain in SAN extension
         san_ext = cert.extensions.get_extension_for_oid(x509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME)
@@ -596,12 +611,40 @@ class TestCertificateManager:
 
         mock_dstack.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "log_state, should_emit",
+        [
+            ("empty", True),
+            ("other_cert", True),
+            ("this_cert", False),
+            ("unreadable", True),
+        ],
+        ids=["fresh-boot", "different-cert", "already-emitted", "log-unreadable"],
+    )
     @patch("cert_manager.cmgr.DstackClient")
     def test_emit_new_cert_event_production(
-        self, mock_dstack, temp_dir, mock_certificate, mock_private_key
+        self,
+        mock_dstack,
+        log_state,
+        should_emit,
+        temp_dir,
+        mock_certificate,
+        mock_private_key,
     ):
-        """Test new certificate event emission in production mode."""
+        """Production emission extends RTMR3 unless this boot's event log already carries
+        this exact certificate; an unreadable log fails open and emits."""
+        cert_hash = sha256(mock_certificate.public_bytes(Encoding.DER)).hexdigest()
+        event_logs = {
+            "empty": [],
+            "other_cert": [_fake_cert_event("00" * 32)],
+            "this_cert": [_fake_cert_event(cert_hash)],
+        }
+
         mock_client = Mock()
+        if log_state == "unreadable":
+            mock_client.info.side_effect = Exception("dstack socket unavailable")
+        else:
+            mock_client.info.return_value.tcb_info.event_log = event_logs[log_state]
         mock_dstack.return_value = mock_client
 
         manager = create_cert_manager(temp_dir, dev_mode=False)
@@ -611,10 +654,11 @@ class TestCertificateManager:
         manager.emit_new_cert_event()
 
         mock_dstack.assert_called_once()
-        mock_client.emit_event.assert_called_once()
-        args, _ = mock_client.emit_event.call_args
-        assert args[0] == "New TLS Certificate"
-        assert len(args[1]) == 64  # SHA256 hash length
+        if should_emit:
+            mock_client.emit_event.assert_called_once_with("New TLS Certificate", cert_hash)
+            assert len(cert_hash) == 64  # SHA256 hash length
+        else:
+            mock_client.emit_event.assert_not_called()
 
     @patch.object(CertificateManager, "generate_deterministic_key")
     @patch.object(CertificateManager, "create_self_signed_cert")
@@ -640,6 +684,34 @@ class TestCertificateManager:
 
         mock_gen_key.assert_called_once_with("cert/debug/test.example.com/v1")
         mock_create_self.assert_called_once_with(mock_private_key)
+        mock_save.assert_called_once_with(mock_certificate, mock_private_key)
+        mock_emit.assert_called_once()
+
+    @patch.object(CertificateManager, "generate_deterministic_key")
+    @patch.object(CertificateManager, "create_self_signed_cert")
+    @patch.object(CertificateManager, "save_certificate_and_key")
+    @patch.object(CertificateManager, "emit_new_cert_event")
+    def test_create_or_renew_certificate_frozen_mode(
+        self,
+        mock_emit,
+        mock_save,
+        mock_create_self,
+        mock_gen_key,
+        temp_dir,
+        mock_private_key,
+        mock_certificate,
+    ):
+        """Frozen mode signs its own long-lived cert from a dedicated key path and still
+        emits the RTMR3 event (production semantics, not dev-mode logging)."""
+        mock_gen_key.return_value = mock_private_key
+        mock_create_self.return_value = mock_certificate
+
+        manager = create_cert_manager(temp_dir, dev_mode=False, frozen_cert=True)
+
+        manager.create_or_renew_certificate()
+
+        mock_gen_key.assert_called_once_with("cert/selfsigned/test.example.com/v1")
+        mock_create_self.assert_called_once_with(mock_private_key, validity_days=36500)
         mock_save.assert_called_once_with(mock_certificate, mock_private_key)
         mock_emit.assert_called_once()
 
@@ -1186,6 +1258,54 @@ class TestCertificateManagerIntegration:
                     mock_setup_nginx.assert_called_once()
                     mock_manage.assert_called_once()
 
+    @patch("cert_manager.cmgr.DstackClient")
+    def test_startup_init_frozen_creates_once_and_reuses(self, mock_dstack, temp_dir):
+        """Frozen mode issues one ~100y self-signed cert and reuses the same certificate
+        across container restarts: no deletion, no renewal, so RTMR3 stays reproducible."""
+        mock_client = Mock()
+        mock_client.get_key.return_value.decode_key.return_value = b"\x05" * 32
+        mock_client.info.return_value.tcb_info.event_log = []
+        mock_dstack.return_value = mock_client
+
+        manager = create_cert_manager(
+            temp_dir, dev_mode=False, letsencrypt_staging=False, frozen_cert=True
+        )
+
+        with patch.object(manager.supervisor, "setup_nginx_https_config"):
+            manager.startup_init()
+            with open(temp_dir / "cert.pem", "rb") as f:
+                first_cert = x509.load_pem_x509_certificates(f.read())[0]
+
+            manager.startup_init()  # container restart
+            with open(temp_dir / "cert.pem", "rb") as f:
+                second_cert = x509.load_pem_x509_certificates(f.read())[0]
+
+        mock_client.get_key.assert_called_with("cert/selfsigned/test.example.com/v1")
+        assert manager.is_cert_self_signed()
+        assert manager.is_cert_valid()
+        assert first_cert.not_valid_after_utc > datetime.now(timezone.utc) + timedelta(days=36000)
+        assert second_cert.serial_number == first_cert.serial_number
+
+    def test_startup_init_frozen_keeps_staging_named_cert(
+        self, temp_dir, mock_letsencrypt_staging_cert, mock_private_key
+    ):
+        """The Let's Encrypt staging cleanup must never delete a frozen cert, which it
+        would otherwise do for any domain whose issuer CN contains "staging"."""
+        manager = create_cert_manager(
+            temp_dir, dev_mode=False, letsencrypt_staging=False, frozen_cert=True
+        )
+
+        manager.save_certificate_and_key(mock_letsencrypt_staging_cert, mock_private_key)
+        assert manager.is_cert_letsencrypt_staging()
+
+        with patch.object(manager, "emit_new_cert_event"):
+            with patch.object(manager.supervisor, "setup_nginx_https_config"):
+                with patch.object(manager, "manage_cert_creation_and_renewal"):
+                    manager.startup_init()
+
+        assert (temp_dir / "cert.pem").exists()
+        assert (temp_dir / "key.pem").exists()
+
     def test_startup_init_production_keeps_prod_cert(
         self, temp_dir, mock_letsencrypt_prod_cert, mock_private_key
     ):
@@ -1291,6 +1411,7 @@ class TestCertificateManagerIntegration:
         # Step 7: Verify emit_new_cert_event works with fullchain
         with patch("cert_manager.cmgr.DstackClient") as mock_dstack_client:
             mock_client = Mock()
+            mock_client.info.return_value.tcb_info.event_log = []
             mock_dstack_client.return_value = mock_client
             manager.emit_new_cert_event()  # Should not raise exception
             mock_dstack_client.assert_called_once()

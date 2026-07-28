@@ -219,6 +219,6 @@ suite in `test_cvm.py`, and then tears the stack down.
 
 ## Notes
 
-- `letsencrypt` is the default TLS mode. `self-signed` skips Let's Encrypt and uses a TEE-derived self-signed certificate path instead.
+- `letsencrypt` is the default TLS mode. `self-signed` skips Let's Encrypt and uses a TEE-derived self-signed certificate path instead: the certificate is issued once, valid for ~100 years, and never renewed, so the RTMR3 certificate event is identical on every boot. It still extends RTMR3, but container restarts inside one boot do not re-emit it.
 - The auth service requires `AUTH_SERVICE_TOKEN`; if it is missing or too short, auth requests fail.
 - The generated stack mounts `/var/run/dstack.sock` into framework services for attestation and deterministic key derivation.

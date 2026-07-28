@@ -30,6 +30,7 @@ if __name__ == "__main__":
     domain = os.getenv("DOMAIN", "localhost")
     cert_email = os.getenv("EMAIL", "certbot@concrete-security.com")
     letsencrypt_account_version = os.getenv("LETSENCRYPT_ACCOUNT_VERSION", "v1")
+    frozen_cert = os.getenv("FROZEN_CERT", "false").lower() == "true"
 
     force_rm_cert_files = os.getenv("FORCE_RM_CERT_FILES", "false").lower() == "true"
 
@@ -39,6 +40,7 @@ if __name__ == "__main__":
         cert_email=cert_email,
         letsencrypt_staging=letsencrypt_staging,
         letsencrypt_account_version=letsencrypt_account_version,
+        frozen_cert=frozen_cert,
         force_rm_cert_files=force_rm_cert_files,
     )
     try:

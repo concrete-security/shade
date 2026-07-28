@@ -12,6 +12,7 @@ from shade.config import (
     RouteConfig,
     ServiceRef,
     ShadeConfig,
+    TlsConfig,
 )
 from shade.generator import generate
 
@@ -426,6 +427,27 @@ class TestGenerateNginxMaxBodySize:
                 ),
             )
 
+
+
+class TestGenerateTls:
+    """Test TLS mode plumbing to cert-manager."""
+
+    @pytest.mark.parametrize(
+        "mode, expected",
+        [("letsencrypt", "FROZEN_CERT=false"), ("self-signed", "FROZEN_CERT=true")],
+    )
+    def test_tls_mode_sets_frozen_cert(self, mode, expected):
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            cvm=CvmConfig(domain="example.com", tls=TlsConfig(mode=mode)),
+        )
+        result = generate(config, _minimal_compose())
+        nginx_env = result["services"]["nginx-cert-manager"]["environment"]
+        assert expected in nginx_env
+
+    def test_invalid_tls_mode_rejected(self):
+        with pytest.raises(Exception, match="mode"):
+            CvmConfig(domain="example.com", tls=TlsConfig(mode="acme-v1"))
 
 
 class TestGenerateDictNetworks:

@@ -35,6 +35,9 @@ class CertificateManager:
     CERT_FILENAME = "cert.pem"
     KEY_FILENAME = "key.pem"
     CERT_EXPIRY_THRESHOLD_DAYS = 30  # Days before expiry to renew
+    CERT_EVENT_NAME = "New TLS Certificate"
+    # Frozen certs are issued once and never renewed, so the expiry threshold never triggers
+    FROZEN_CERT_VALIDITY_DAYS = 36500
 
     def __init__(
         self,
@@ -43,6 +46,7 @@ class CertificateManager:
         cert_email: str,
         letsencrypt_staging: bool,
         letsencrypt_account_version: str,
+        frozen_cert: bool = False,
         cert_path: str = "/etc/nginx/ssl",
         acme_path: str = "/acme-challenge/",
         force_rm_cert_files: bool = False,
@@ -53,6 +57,9 @@ class CertificateManager:
         self.letsencrypt_staging = letsencrypt_staging
         # used to easily switch to another account
         self.letsencrypt_account_version = letsencrypt_account_version
+        # production self-signed certificate, created once and never renewed, so that
+        # the RTMR3 cert event is identical on every boot
+        self.frozen_cert = frozen_cert
         self.supervisor = Supervisor()
 
         self.cert_path = Path(cert_path)
@@ -63,7 +70,9 @@ class CertificateManager:
 
         self.force_rm_cert_files = force_rm_cert_files
 
-        logger.info(f"Domain: {self.domain}, Dev mode: {self.dev_mode}")
+        logger.info(
+            f"Domain: {self.domain}, Dev mode: {self.dev_mode}, Frozen cert: {self.frozen_cert}"
+        )
 
     def get_deterministic_key_material(self, key_path: str) -> bytes:
         """Get deterministic key material using Phala dstack SDK.
@@ -193,11 +202,18 @@ class CertificateManager:
         return certs
 
     def create_self_signed_cert(
-        self, private_key: ec.EllipticCurvePrivateKey
+        self, private_key: ec.EllipticCurvePrivateKey, validity_days: int = 365
     ) -> List[x509.Certificate]:
-        """Create self-signed certificate for development."""
+        """Create self-signed certificate.
 
-        logger.info("Creating self-signed certificate for development")
+        Args:
+            private_key (ec.EllipticCurvePrivateKey): Key the certificate is issued for.
+            validity_days (int): Certificate lifetime in days.
+        Returns:
+            List[x509.Certificate]: The self-signed certificate, as a single-element chain.
+        """
+
+        logger.info(f"Creating self-signed certificate valid for {validity_days} days")
 
         # Create certificate
         subject = issuer = x509.Name(
@@ -214,7 +230,7 @@ class CertificateManager:
             .public_key(private_key.public_key())
             .serial_number(x509.random_serial_number())
             .not_valid_before(datetime.now(timezone.utc))
-            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=365))
+            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=validity_days))
             .add_extension(
                 x509.SubjectAlternativeName(
                     [
@@ -424,10 +440,43 @@ class CertificateManager:
         else:
             logger.debug("No certificate files found to delete")
 
+    def is_cert_event_in_boot_log(self, dstack_client: DstackClient, cert_hash: str) -> bool:
+        """Check the current boot's dstack event log for this certificate's event.
+
+        RTMR3 and its event log reset when the TD boots, so the guest event log is the
+        only source of truth for "already emitted during this boot": a marker file would
+        survive a reboot and wrongly suppress a required emission.
+
+        Matches the last cert event only, mirroring how aTLS verifiers resolve the
+        certificate event. Any failure to read the log returns False so that the caller
+        emits: a missing event breaks aTLS verification, a duplicate only extends RTMR3.
+
+        Args:
+            dstack_client (DstackClient): Client used to read the guest event log.
+            cert_hash (str): SHA256 hex digest of the leaf certificate DER.
+        Returns:
+            bool: True if the last cert event carries this certificate hash.
+        """
+        try:
+            event_log = dstack_client.info().tcb_info.event_log
+            last_cert_event = next(
+                (event for event in reversed(event_log) if event.event == self.CERT_EVENT_NAME),
+                None,
+            )
+            if last_cert_event is None:
+                return False
+            # emit_event hex-encodes the payload before extending RTMR3
+            return last_cert_event.event_payload == cert_hash.encode().hex()
+        except Exception as e:
+            logger.warning(f"Could not read dstack event log, emitting cert event anyway: {e}")
+            return False
+
     def emit_new_cert_event(self):
         """Emit new cert event in RTMR3.
 
-        This will only log the cert hash in dev mode.
+        This will only log the cert hash in dev mode. In the other modes the event is
+        skipped when this boot's event log already ends with it, so that container
+        restarts do not keep extending RTMR3.
         """
         cert_file = self.cert_path / self.CERT_FILENAME
         with open(cert_file, "rb") as f:
@@ -443,10 +492,13 @@ class CertificateManager:
         cert_hash = sha256(cert_der).hexdigest()
 
         if self.dev_mode:  # only log cert hash
-            logger.info(f"New TLS Certificate: {cert_hash}")
+            logger.info(f"{self.CERT_EVENT_NAME}: {cert_hash}")
         else:  # Emit new cert event to Dstack (extend RTMR3)
             dstack_client = DstackClient()
-            dstack_client.emit_event("New TLS Certificate", cert_hash)
+            if self.is_cert_event_in_boot_log(dstack_client, cert_hash):
+                logger.info("TLS certificate event already emitted this boot, skipping")
+                return
+            dstack_client.emit_event(self.CERT_EVENT_NAME, cert_hash)
             logger.info("Emitted new TLS certificate event to Dstack")
 
     def create_or_renew_certificate(self):
@@ -457,6 +509,12 @@ class CertificateManager:
         if self.dev_mode:  # Development mode: create self-signed certificate
             private_key = self.generate_deterministic_key(f"cert/debug/{self.domain}/v1")
             cert_chain = self.create_self_signed_cert(private_key)
+            self.save_certificate_and_key(cert_chain, private_key)
+        elif self.frozen_cert:  # Frozen mode: self-signed certificate, created once
+            private_key = self.generate_deterministic_key(f"cert/selfsigned/{self.domain}/v1")
+            cert_chain = self.create_self_signed_cert(
+                private_key, validity_days=self.FROZEN_CERT_VALIDITY_DAYS
+            )
             self.save_certificate_and_key(cert_chain, private_key)
         # TODO: sync using S3 bucket for multiple replicas (in production)
         # We should have a lock file, then only one will push its generated cert, Others
@@ -524,18 +582,21 @@ class CertificateManager:
         except Exception as e:
             logger.error(f"Failed to force delete certificate files: {e}")
 
-        # If in production (or staging), delete any existing self-signed certificate
+        # If in production (or staging), delete any existing self-signed certificate.
+        # Frozen certs are self-signed on purpose and must survive restarts.
         try:
-            if not self.dev_mode and self.is_cert_self_signed():
+            if not self.dev_mode and not self.frozen_cert and self.is_cert_self_signed():
                 logger.info("Found self-signed certificate in production mode, deleting it")
                 self.delete_certificate_files()
         except Exception as e:
             logger.error(f"Failed to check/delete self-signed certificate: {e}")
 
-        # If in production, delete Let's Encrypt staging certificates
+        # If in production, delete Let's Encrypt staging certificates. Skipped for frozen
+        # certs: a domain containing "staging" would otherwise look like a staging cert.
         try:
             if (
                 not self.dev_mode
+                and not self.frozen_cert
                 and not self.letsencrypt_staging
                 and self.is_cert_letsencrypt_staging()
             ):

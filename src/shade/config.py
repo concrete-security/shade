@@ -4,7 +4,7 @@ Defines the shade.yml schema using Pydantic v2 models.
 """
 
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 import yaml
 from pydantic import BaseModel, field_validator, model_validator
@@ -67,6 +67,8 @@ class CorsConfig(BaseModel):
 class TlsConfig(BaseModel):
     """TLS configuration."""
 
+    # "self-signed" issues a frozen TEE-derived certificate instead of using Let's Encrypt
+    mode: Literal["letsencrypt", "self-signed"] = "letsencrypt"
     letsencrypt_staging: bool = False
     letsencrypt_account_version: str = "v1"
 

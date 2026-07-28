@@ -162,6 +162,7 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         "DEV_MODE=false",
         f"LETSENCRYPT_STAGING={'true' if config.cvm.tls.letsencrypt_staging else 'false'}",
         f"LETSENCRYPT_ACCOUNT_VERSION={config.cvm.tls.letsencrypt_account_version}",
+        f"FROZEN_CERT={'true' if config.cvm.tls.mode == 'self-signed' else 'false'}",
         "FORCE_RM_CERT_FILES=false",
         "LOG_LEVEL=INFO",
     ]
