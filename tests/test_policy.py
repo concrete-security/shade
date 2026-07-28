@@ -64,6 +64,7 @@ def test_fetch_cvm_measurements_success(monkeypatch):
             "rtmr0": "bb" * 48,
             "rtmr1": "cc" * 48,
             "rtmr2": "dd" * 48,
+            "rtmr3": "ff" * 48,
             "app_compose": json.dumps(
                 {"docker_compose_file": "services: {}", "runner": "docker-compose"}
             ),
@@ -89,6 +90,7 @@ def test_fetch_cvm_measurements_success(monkeypatch):
     assert result["rtmr0"] == "bb" * 48
     assert result["rtmr1"] == "cc" * 48
     assert result["rtmr2"] == "dd" * 48
+    assert result["rtmr3"] == "ff" * 48
     assert result["os_image_hash"] == "ee" * 32
     assert result["app_compose"]["docker_compose_file"] == "services: {}"
     assert result["app_compose"]["runner"] == "docker-compose"
@@ -148,17 +150,34 @@ def test_fetch_cvm_measurements_missing_tcb_info(monkeypatch):
         fetch_cvm_measurements("test.example.com")
 
 
-def test_fetch_cvm_measurements_invalid_measurements(monkeypatch):
-    """Test invalid measurements raise PolicyFetchError."""
+@pytest.mark.parametrize(
+    "override, expected_invalid",
+    [
+        ({"mrtd": "NOT_HEX"}, "mrtd"),
+        ({"rtmr3": None}, "rtmr3"),
+        ({"rtmr3": "FF" * 48}, "rtmr3"),
+    ],
+    ids=["mrtd-not-hex", "rtmr3-missing", "rtmr3-uppercase-hex"],
+)
+def test_fetch_cvm_measurements_invalid_measurements(monkeypatch, override, expected_invalid):
+    """Test invalid measurements raise PolicyFetchError, rtmr3 included."""
+    tcb_info = {
+        "mrtd": "aa" * 48,
+        "rtmr0": "bb" * 48,
+        "rtmr1": "cc" * 48,
+        "rtmr2": "dd" * 48,
+        "rtmr3": "ff" * 48,
+        "app_compose": json.dumps({"docker_compose_file": "services: {}"}),
+    }
+    for name, value in override.items():
+        if value is None:
+            del tcb_info[name]
+        else:
+            tcb_info[name] = value
+
     fake_cvm_response = {
         "success": True,
-        "tcb_info": {
-            "mrtd": "NOT_HEX",  # Invalid
-            "rtmr0": "bb" * 48,
-            "rtmr1": "cc" * 48,
-            "rtmr2": "dd" * 48,
-            "app_compose": json.dumps({"docker_compose_file": "services: {}"}),
-        },
+        "tcb_info": tcb_info,
         "quote": {
             "vm_config": json.dumps({"os_image_hash": "ee" * 32}),
         },
@@ -169,7 +188,7 @@ def test_fetch_cvm_measurements_invalid_measurements(monkeypatch):
 
     monkeypatch.setattr("shade.policy.request.urlopen", fake_urlopen)
 
-    with pytest.raises(PolicyFetchError, match="invalid measurements"):
+    with pytest.raises(PolicyFetchError, match=f"invalid measurements: {expected_invalid}"):
         fetch_cvm_measurements("test.example.com")
 
 
@@ -182,6 +201,7 @@ def test_fetch_cvm_measurements_invalid_app_compose(monkeypatch):
             "rtmr0": "bb" * 48,
             "rtmr1": "cc" * 48,
             "rtmr2": "dd" * 48,
+            "rtmr3": "ff" * 48,
             "app_compose": "not json {{{",  # Invalid JSON
         },
         "quote": {
@@ -213,6 +233,7 @@ def test_fetch_cvm_measurements_missing_os_image_hash(monkeypatch):
             "rtmr0": "bb" * 48,
             "rtmr1": "cc" * 48,
             "rtmr2": "dd" * 48,
+            "rtmr3": "ff" * 48,
             "app_compose": json.dumps({"docker_compose_file": "services: {}"}),
         },
         "quote": {
@@ -253,6 +274,7 @@ def test_generate_atlas_policy_production(monkeypatch):
         "rtmr0": "bb" * 48,
         "rtmr1": "cc" * 48,
         "rtmr2": "dd" * 48,
+        "rtmr3": "ff" * 48,
         "os_image_hash": "ee" * 32,
         "app_compose": {"docker_compose_file": "services: {}", "runner": "docker-compose"},
     }
@@ -271,6 +293,8 @@ def test_generate_atlas_policy_production(monkeypatch):
     assert policy["expected_bootchain"]["rtmr0"] == "bb" * 48
     assert policy["expected_bootchain"]["rtmr1"] == "cc" * 48
     assert policy["expected_bootchain"]["rtmr2"] == "dd" * 48
+    assert "rtmr3" not in policy["expected_bootchain"]
+    assert policy["expected_rtmr3"] == "ff" * 48
     assert policy["os_image_hash"] == "ee" * 32
     assert policy["app_compose"]["docker_compose_file"] == "services: {}"
     assert policy["app_compose"]["runner"] == "docker-compose"
@@ -283,6 +307,7 @@ def test_generate_atlas_policy_custom_tcb(monkeypatch):
         "rtmr0": "bb" * 48,
         "rtmr1": "cc" * 48,
         "rtmr2": "dd" * 48,
+        "rtmr3": "ff" * 48,
         "os_image_hash": "ee" * 32,
         "app_compose": {"docker_compose_file": "services: {}"},
     }
@@ -304,6 +329,7 @@ def test_generate_atlas_policy_dev_mode():
     assert policy["type"] == "dstack_tdx"
     assert policy["disable_runtime_verification"] is True
     assert "expected_bootchain" not in policy
+    assert "expected_rtmr3" not in policy
     assert "os_image_hash" not in policy
     assert "app_compose" not in policy
 
@@ -327,6 +353,7 @@ def test_generate_atlas_policy_compose_match(monkeypatch):
         "rtmr0": "bb" * 48,
         "rtmr1": "cc" * 48,
         "rtmr2": "dd" * 48,
+        "rtmr3": "ff" * 48,
         "os_image_hash": "ee" * 32,
         "app_compose": {"docker_compose_file": "services:\n  app:\n    image: python:3.11\n"},
     }
@@ -351,6 +378,7 @@ def test_generate_atlas_policy_compose_mismatch(monkeypatch):
         "rtmr0": "bb" * 48,
         "rtmr1": "cc" * 48,
         "rtmr2": "dd" * 48,
+        "rtmr3": "ff" * 48,
         "os_image_hash": "ee" * 32,
         "app_compose": {"docker_compose_file": "services:\n  app:\n    image: evil:latest\n"},
     }

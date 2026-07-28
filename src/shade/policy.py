@@ -47,11 +47,13 @@ def fetch_cvm_measurements(domain: str, *, timeout: float = 30.0) -> dict[str, A
         SSL verification is disabled (CVMs may self-sign), and the TDX
         quote is **not verified** against Intel DCAP collateral.
 
-        All returned values (bootchain measurements, os_image_hash,
+        All returned values (bootchain measurements, rtmr3, os_image_hash,
         app_compose) could be fabricated — by the CVM operator or by
         anyone who can MITM the connection.  The only field callers
         can independently verify is ``docker_compose_file`` inside
         ``app_compose`` (by comparing with the locally-built compose).
+        ``rtmr3`` in particular is trust-on-first-use: the operator
+        accepts the runtime-measurement chain the CVM reports at launch.
 
         For full verification, use Atlas aTLS (``createAtlsFetch``).
 
@@ -60,7 +62,7 @@ def fetch_cvm_measurements(domain: str, *, timeout: float = 30.0) -> dict[str, A
         timeout: HTTP timeout in seconds.
 
     Returns:
-        Dict with keys: mrtd, rtmr0, rtmr1, rtmr2, os_image_hash, app_compose.
+        Dict with keys: mrtd, rtmr0, rtmr1, rtmr2, rtmr3, os_image_hash, app_compose.
 
     Raises:
         PolicyFetchError: If CVM is unreachable, response invalid, or data missing.
@@ -116,10 +118,10 @@ def fetch_cvm_measurements(domain: str, *, timeout: float = 30.0) -> dict[str, A
     if not isinstance(tcb_info, dict):
         raise PolicyFetchError(f"CVM at {domain} missing tcb_info")
 
-    # Extract bootchain measurements
+    # Extract bootchain measurements plus the runtime measurement register (rtmr3)
     measurements: dict[str, str] = {}
     invalid = []
-    for name in ("mrtd", "rtmr0", "rtmr1", "rtmr2"):
+    for name in ("mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3"):
         value = tcb_info.get(name)
         if not isinstance(value, str) or not _is_valid_lowercase_hex(value):
             invalid.append(name)
@@ -165,6 +167,7 @@ def fetch_cvm_measurements(domain: str, *, timeout: float = 30.0) -> dict[str, A
         "rtmr0": measurements["rtmr0"],
         "rtmr1": measurements["rtmr1"],
         "rtmr2": measurements["rtmr2"],
+        "rtmr3": measurements["rtmr3"],
         "os_image_hash": os_image_hash,
         "app_compose": app_compose,
     }
@@ -195,15 +198,17 @@ def generate_atlas_policy(
         In production mode, measurements are fetched via
         ``fetch_cvm_measurements`` over plain HTTPS — the TDX quote is
         **not** verified against Intel DCAP collateral.  This means
-        **all returned values** (bootchain, os_image_hash, app_compose)
-        could be fabricated by the CVM operator or anyone who can MITM
-        the connection.
+        **all returned values** (bootchain, rtmr3, os_image_hash,
+        app_compose) could be fabricated by the CVM operator or anyone
+        who can MITM the connection.
 
         The **only** field you can independently verify is
         ``docker_compose_file`` inside ``app_compose``: pass your local
         compose file via the ``docker_compose_file`` parameter and this
         function will compare it against what the CVM reports.  Everything
-        else (mrtd, rtmr0-2, os_image_hash) is trusted without evidence.
+        else (mrtd, rtmr0-2, rtmr3, os_image_hash) is trusted without
+        evidence — ``expected_rtmr3`` pins the runtime measurements the
+        CVM happened to report at launch (trust on first use).
 
         For full verification of an untrusted CVM, use Atlas aTLS
         (``createAtlsFetch``) which performs DCAP quote verification
@@ -259,6 +264,7 @@ def generate_atlas_policy(
             "rtmr1": measurements["rtmr1"],
             "rtmr2": measurements["rtmr2"],
         }
+        policy["expected_rtmr3"] = measurements["rtmr3"]
         policy["os_image_hash"] = measurements["os_image_hash"]
         policy["app_compose"] = measurements["app_compose"]
 
