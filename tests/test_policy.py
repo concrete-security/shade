@@ -294,7 +294,9 @@ def test_generate_atlas_policy_production(monkeypatch):
     assert policy["expected_bootchain"]["rtmr1"] == "cc" * 48
     assert policy["expected_bootchain"]["rtmr2"] == "dd" * 48
     assert "rtmr3" not in policy["expected_bootchain"]
-    assert policy["expected_rtmr3"] == "ff" * 48
+    # RTMR3 is pinned only for frozen-cert CVMs; a Let's Encrypt CVM (the default)
+    # must NOT carry the pin, or it fails verification on the next cert renewal.
+    assert "expected_rtmr3" not in policy
     assert policy["os_image_hash"] == "ee" * 32
     assert policy["app_compose"]["docker_compose_file"] == "services: {}"
     assert policy["app_compose"]["runner"] == "docker-compose"
@@ -352,6 +354,8 @@ def test_generate_atlas_policy_self_signed(monkeypatch):
 
     policy = generate_atlas_policy("test.example.com", accept_self_signed_certs=True)
     assert policy["accept_self_signed_certs"] is True
+    # Frozen cert ⇒ stable RTMR3 ⇒ safe to pin, and pinned together with the flag.
+    assert policy["expected_rtmr3"] == "ff" * 48
 
 
 def test_generate_atlas_policy_self_signed_with_dev_mode_rejected():

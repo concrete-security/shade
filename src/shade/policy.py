@@ -279,7 +279,13 @@ def generate_atlas_policy(
             "rtmr1": measurements["rtmr1"],
             "rtmr2": measurements["rtmr2"],
         }
-        policy["expected_rtmr3"] = measurements["rtmr3"]
+        # Pin RTMR3 only for frozen-cert CVMs. A frozen self-signed cert never
+        # rotates, so RTMR3 is stable and safe to pin. A Let's Encrypt CVM renews
+        # its cert (~60d), which appends a "New TLS Certificate" event and drifts
+        # RTMR3 — pinning it would fail verification on the next renewal.
+        # accept_self_signed_certs marks the frozen case, so the two travel together.
+        if accept_self_signed_certs:
+            policy["expected_rtmr3"] = measurements["rtmr3"]
         policy["os_image_hash"] = measurements["os_image_hash"]
         policy["app_compose"] = measurements["app_compose"]
 
