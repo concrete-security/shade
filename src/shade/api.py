@@ -212,6 +212,7 @@ def generate_atlas_policy(
     docker_compose_file: str | None = None,
     allowed_tcb_status: list[str] | None = None,
     disable_runtime_verification: bool = False,
+    accept_self_signed_certs: bool = False,
 ) -> dict:
     """Generate an Atlas-compatible policy for a CVM deployment.
 
@@ -221,6 +222,8 @@ def generate_atlas_policy(
             the CVM's reported compose. Recommended for production.
         allowed_tcb_status: Allowed TCB status values. Defaults to ["UpToDate"].
         disable_runtime_verification: Skip runtime checks (dev only).
+        accept_self_signed_certs: Emit accept_self_signed_certs for CVMs served
+            with a self-signed TLS cert (cvm.tls.mode: self-signed).
 
     Returns:
         Atlas policy dict ready for JSON serialization.
@@ -230,4 +233,5 @@ def generate_atlas_policy(
         docker_compose_file=docker_compose_file,
         allowed_tcb_status=allowed_tcb_status,
         disable_runtime_verification=disable_runtime_verification,
+        accept_self_signed_certs=accept_self_signed_certs,
     )

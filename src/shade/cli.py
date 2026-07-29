@@ -162,6 +162,12 @@ def _write_policy_output(policy_dict: dict, output: str) -> None:
     help="Skip runtime verification (dev mode only).",
 )
 @click.option(
+    "--accept-self-signed-certs",
+    is_flag=True,
+    default=False,
+    help="Accept the CVM's self-signed TLS cert (required for cvm.tls.mode: self-signed).",
+)
+@click.option(
     "--output",
     "-o",
     default="-",
@@ -173,6 +179,7 @@ def generate(
     compose: str | None,
     allowed_tcb_status: str | None,
     disable_runtime_verification: bool,
+    accept_self_signed_certs: bool,
     output: str,
 ):
     """Generate an Atlas-compatible policy.
@@ -195,6 +202,7 @@ def generate(
             docker_compose_file=compose_content,
             allowed_tcb_status=tcb_list,
             disable_runtime_verification=disable_runtime_verification,
+            accept_self_signed_certs=accept_self_signed_certs,
         )
     except (ValueError, RuntimeError) as e:
         click.echo(f"Error: {e}", err=True)

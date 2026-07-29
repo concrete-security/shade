@@ -332,6 +332,34 @@ def test_generate_atlas_policy_dev_mode():
     assert "expected_rtmr3" not in policy
     assert "os_image_hash" not in policy
     assert "app_compose" not in policy
+    assert "accept_self_signed_certs" not in policy
+
+
+def test_generate_atlas_policy_self_signed(monkeypatch):
+    """Production policy emits accept_self_signed_certs when requested (frozen-cert CVMs)."""
+    fake_measurements = {
+        "mrtd": "aa" * 48,
+        "rtmr0": "bb" * 48,
+        "rtmr1": "cc" * 48,
+        "rtmr2": "dd" * 48,
+        "rtmr3": "ff" * 48,
+        "os_image_hash": "ee" * 32,
+        "app_compose": {"docker_compose_file": "services: {}"},
+    }
+    monkeypatch.setattr(
+        "shade.policy.fetch_cvm_measurements", lambda domain, *, timeout=30.0: fake_measurements
+    )
+
+    policy = generate_atlas_policy("test.example.com", accept_self_signed_certs=True)
+    assert policy["accept_self_signed_certs"] is True
+
+
+def test_generate_atlas_policy_self_signed_with_dev_mode_rejected():
+    """accept_self_signed_certs + disable_runtime_verification pins nothing; rejected."""
+    with pytest.raises(ValueError, match="cannot be combined with"):
+        generate_atlas_policy(
+            disable_runtime_verification=True, accept_self_signed_certs=True
+        )
 
 
 def test_generate_atlas_policy_missing_domain():

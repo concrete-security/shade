@@ -184,6 +184,7 @@ def generate_atlas_policy(
     docker_compose_file: str | None = None,
     allowed_tcb_status: list[str] | None = None,
     disable_runtime_verification: bool = False,
+    accept_self_signed_certs: bool = False,
 ) -> dict[str, Any]:
     """Generate an Atlas-compatible policy for a CVM deployment.
 
@@ -221,10 +222,21 @@ def generate_atlas_policy(
             for production — raises ValueError on mismatch.
         allowed_tcb_status: Allowed TCB status values. Defaults to ["UpToDate"].
         disable_runtime_verification: Skip runtime checks (dev mode).
+        accept_self_signed_certs: Emit ``accept_self_signed_certs`` so the aTLS
+            client accepts the CVM's self-signed TLS certificate (skipping CA
+            chain, hostname, and expiry validation). Required for CVMs served
+            with ``cvm.tls.mode: self-signed``. Atlas rejects it together with
+            ``disable_runtime_verification``.
 
     Returns:
         Atlas policy dict ready for JSON serialization.
     """
+    if accept_self_signed_certs and disable_runtime_verification:
+        raise ValueError(
+            "accept_self_signed_certs cannot be combined with "
+            "disable_runtime_verification"
+        )
+
     if allowed_tcb_status is None:
         allowed_tcb_status = ["UpToDate"]
 
@@ -238,6 +250,9 @@ def generate_atlas_policy(
         "type": "dstack_tdx",
         "allowed_tcb_status": allowed_tcb_status,
     }
+
+    if accept_self_signed_certs:
+        policy["accept_self_signed_certs"] = True
 
     if disable_runtime_verification:
         policy["disable_runtime_verification"] = True
