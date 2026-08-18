@@ -1303,20 +1303,6 @@ class TestCertificateManagerIntegration:
 
         mock_setup.assert_called_once()
 
-    def test_startup_serves_cert_when_event_emission_fails(
-        self, temp_dir, renewal_due_cert, mock_private_key
-    ):
-        """A failed RTMR3 event must not cost the listener: HTTPS is configured first."""
-        manager = create_cert_manager(temp_dir)
-        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
-
-        with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_setup:
-            with patch.object(manager, "emit_new_cert_event", side_effect=Exception("no dstack")):
-                with patch.object(manager, "manage_cert_creation_and_renewal"):
-                    manager.startup_init()
-
-        mock_setup.assert_called_once()
-
     def test_renewal_failure_serves_installed_cert_once(
         self, temp_dir, renewal_due_cert, mock_private_key
     ):
@@ -1366,6 +1352,68 @@ class TestCertificateManagerIntegration:
                 manager.manage_cert_creation_and_renewal()
 
         mock_setup.assert_not_called()
+
+    def test_https_bring_up_measures_certificate_before_serving(
+        self, temp_dir, renewal_due_cert, mock_private_key
+    ):
+        """The certificate must be recorded in RTMR3 before nginx serves it.
+
+        The attestation verifier rejects a session whose certificate is absent from the
+        event log, so serving first produces a CVM that looks healthy but cannot be
+        attested (`certificate_not_in_event_log`).
+        """
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+
+        calls = []
+        with patch.object(manager, "emit_new_cert_event", side_effect=lambda: calls.append("emit")):
+            with patch.object(
+                manager.supervisor,
+                "setup_nginx_https_config",
+                side_effect=lambda: calls.append("serve"),
+            ):
+                manager.ensure_https_configured()
+
+        assert calls == ["emit", "serve"]
+
+    def test_https_bring_up_does_not_serve_an_unmeasured_certificate(
+        self, temp_dir, renewal_due_cert, mock_private_key
+    ):
+        """If the RTMR3 event cannot be emitted, do not serve: an unmeasured certificate
+        fails attestation, and the retry loop will attempt both steps again."""
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+
+        with patch.object(manager, "emit_new_cert_event", side_effect=Exception("dstack down")):
+            with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_serve:
+                with pytest.raises(Exception, match="dstack down"):
+                    manager.ensure_https_configured()
+
+                mock_serve.assert_not_called()
+
+        assert manager._https_configured is False
+
+    def test_retry_measures_certificate_after_an_nginx_rollback(
+        self, temp_dir, renewal_due_cert, mock_private_key
+    ):
+        """The production failure: nginx rejected the first attempt, and the later retry
+        must still record the certificate rather than serving it unmeasured."""
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+
+        with patch.object(manager, "emit_new_cert_event") as mock_emit:
+            with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_serve:
+                mock_serve.side_effect = [Exception("nginx rejected"), None]
+
+                with pytest.raises(Exception, match="nginx rejected"):
+                    manager.ensure_https_configured()
+                assert manager._https_configured is False
+
+                manager.ensure_https_configured()
+
+        assert manager._https_configured is True
+        assert mock_emit.call_count == 2
+        assert mock_serve.call_count == 2
 
     def test_startup_init_dev_mode_with_valid_cert(
         self, temp_dir, mock_certificate, mock_private_key
