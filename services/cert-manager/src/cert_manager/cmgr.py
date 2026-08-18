@@ -36,6 +36,7 @@ class CertificateManager:
     CERT_FILENAME = "cert.pem"
     KEY_FILENAME = "key.pem"
     CERT_EXPIRY_THRESHOLD_DAYS = 30  # Days before expiry to renew
+    HTTPS_RETRY_INTERVAL_SECONDS = 60  # Main-loop cadence; also retries HTTPS bring-up
 
     def __init__(
         self,
@@ -652,4 +653,14 @@ class CertificateManager:
             except Exception as e:
                 logger.error(f"Failed while running scheduled tasks: {e}")
 
-            time.sleep(3600 * 6)  # Check every 6 hours
+            # Retry bringing HTTPS up while a serviceable certificate is installed but
+            # nginx is not serving it yet. An app upstream that has not started is enough
+            # to make nginx reject the config at boot, and waiting for the daily renewal
+            # job to try again would leave the CVM without TLS for hours. Idempotent once
+            # it succeeds.
+            try:
+                self.ensure_https_configured()
+            except Exception as e:
+                logger.error(f"Failed to bring up HTTPS: {e}")
+
+            time.sleep(self.HTTPS_RETRY_INTERVAL_SECONDS)
