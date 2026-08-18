@@ -22,7 +22,7 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     NoEncryption,
 )
-from typing import List, Union
+from typing import List, Optional, Union
 import schedule
 from dstack_sdk import DstackClient
 
@@ -68,6 +68,7 @@ class CertificateManager:
         self.cert_path.mkdir(exist_ok=True)
 
         self.force_rm_cert_files = force_rm_cert_files
+        self._https_configured = False
 
         logger.info(f"Domain: {self.domain}, Dev mode: {self.dev_mode}")
 
@@ -281,10 +282,12 @@ class CertificateManager:
         os.chmod(key_file, 0o600)
         logger.info(f"Private key saved to {key_file}")
 
-    def is_cert_valid(self) -> bool:
+    def is_cert_valid(self, expiry_threshold_days: Optional[int] = None) -> bool:
         """Check if current certificate is valid.
 
         Checks if the cert and key files exist and if the cert is not expiring soon.
+        `expiry_threshold_days` overrides how much remaining life is required; 0 asks only
+        that the certificate has not already expired.
         """
         cert_file = self.cert_path / self.CERT_FILENAME
         key_file = self.cert_path / self.KEY_FILENAME
@@ -305,6 +308,8 @@ class CertificateManager:
             leaf_cert = certs[0]
             expiry_threshold = datetime.now(timezone.utc) + timedelta(
                 days=self.CERT_EXPIRY_THRESHOLD_DAYS
+                if expiry_threshold_days is None
+                else expiry_threshold_days
             )
             if leaf_cert.not_valid_after_utc < expiry_threshold:
                 logger.info(
@@ -319,6 +324,26 @@ class CertificateManager:
         except Exception as e:
             logger.error(f"Error checking certificate validity: {e}")
             return False
+
+    def is_cert_serviceable(self) -> bool:
+        """Whether the installed certificate can still terminate TLS.
+
+        Stays True inside the renewal window, unlike `is_cert_valid`: a renewal-due
+        certificate is still trusted by clients, so nginx must keep serving it while
+        renewal is retried.
+        """
+        return self.is_cert_valid(expiry_threshold_days=0)
+
+    def ensure_https_configured(self) -> None:
+        """Serve the installed certificate over HTTPS, at most once.
+
+        Idempotent so a renewal that keeps failing does not restart nginx — dropping live
+        connections — on every scheduled run.
+        """
+        if self._https_configured or not self.is_cert_serviceable():
+            return
+        self.supervisor.setup_nginx_https_config()
+        self._https_configured = True
 
     def is_cert_self_signed(self) -> bool:
         """Check if the current certificate is self-signed.
@@ -545,9 +570,12 @@ class CertificateManager:
                 self.create_or_renew_certificate()
             except Exception as e:
                 logger.error(f"Failed to create or renew certificate: {e}")
+                # Serve what is on disk rather than leaving nginx HTTP-only.
+                self.ensure_https_configured()
                 return
             try:
                 self.supervisor.setup_nginx_https_config()
+                self._https_configured = True
             except Exception as e:
                 logger.error(f"Failed to setup and restart Nginx: {e}")
 
@@ -587,15 +615,16 @@ class CertificateManager:
         except Exception as e:
             logger.error(f"Failed to check/delete Let's Encrypt staging certificate: {e}")
 
-        # If cert is valid on startup:
-        # - emit new cert event in RTMR3
-        # - setup Nginx with HTTPS
+        # If a cert that can still terminate TLS is on disk, serve it and record it in
+        # RTMR3. A renewal-due cert counts: renewal can fail for reasons the guest cannot
+        # fix, and gating HTTPS on it takes the CVM offline entirely. HTTPS is configured
+        # before the event is emitted so a failed emission cannot keep the listener down.
         try:
-            if self.is_cert_valid():
+            if self.is_cert_serviceable():
+                self.ensure_https_configured()
                 self.emit_new_cert_event()
-                self.supervisor.setup_nginx_https_config()
         except Exception as e:
-            logger.error(f"Failed to setup and restart Nginx: {e}")
+            logger.error(f"Failed to bring up HTTPS at startup: {e}")
 
         # Initial certificate creation/check
         try:

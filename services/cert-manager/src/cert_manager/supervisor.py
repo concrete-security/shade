@@ -6,6 +6,7 @@ Manages different processes (nginx and cert-manager) via Supervisord.
 
 import os
 import logging
+import shutil
 import subprocess
 from typing import Optional
 
@@ -127,6 +128,19 @@ class Supervisor:
             logger.error(f"Failed to restart nginx: {e}")
             raise
 
+    def nginx_config_is_valid(self) -> bool:
+        """Whether nginx can load the configuration currently on disk."""
+        try:
+            result = subprocess.run(
+                ["nginx", "-t"], capture_output=True, text=True, timeout=30, check=False
+            )
+        except Exception as e:
+            logger.error(f"Could not validate nginx configuration: {e}")
+            return False
+        if result.returncode != 0:
+            logger.error(f"nginx rejected the configuration: {(result.stderr or '').strip()}")
+        return result.returncode == 0
+
     def setup_nginx_https_config(self):
         """
         Set up nginx with the base + HTTPS configuration and restart nginx.
@@ -168,6 +182,14 @@ class Supervisor:
         except Exception as e:
             logger.error(f"Failed to setup nginx HTTPS configuration: {e}")
             raise
+
+        # Never restart into a config nginx cannot load. The HTTPS half carries the app
+        # upstreams, so one that does not resolve yet would kill nginx and take port 80 —
+        # and with it the ACME webroot — down alongside HTTPS.
+        if not self.nginx_config_is_valid():
+            shutil.copyfile(self.nginx_base_conf_path, self.nginx_conf_path)
+            logger.error("Restored the HTTP-only base configuration; port 80 keeps serving")
+            raise Exception("nginx rejected the base + HTTPS configuration")
 
         # Restart nginx to apply the new configuration
         try:

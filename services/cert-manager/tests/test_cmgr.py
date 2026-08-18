@@ -126,6 +126,22 @@ def mock_letsencrypt_prod_cert(mock_private_key):
 
 
 @pytest.fixture
+def renewal_due_cert(mock_private_key):
+    """A certificate inside CERT_EXPIRY_THRESHOLD_DAYS but not yet expired."""
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test.example.com")])
+    return (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(mock_private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(timezone.utc) - timedelta(days=70))
+        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=20))
+        .sign(mock_private_key, hashes.SHA256())
+    )
+
+
+@pytest.fixture
 def expired_certificate(mock_private_key):
     """Generate an expired certificate."""
     subject = issuer = x509.Name(
@@ -975,7 +991,8 @@ class TestSupervisor:
 
         supervisor = Supervisor()
 
-        supervisor.setup_nginx_https_config()
+        with patch.object(supervisor, "nginx_config_is_valid", return_value=True):
+            supervisor.setup_nginx_https_config()
 
         # Verify files were opened for reading and writing
         assert mock_file.call_count >= 3  # Read base, read https, write combined
@@ -1035,12 +1052,38 @@ class TestSupervisor:
             nginx_https_conf_path=str(https_config_path),
         )
 
-        supervisor.setup_nginx_https_config()
+        with patch.object(supervisor, "nginx_config_is_valid", return_value=True):
+            supervisor.setup_nginx_https_config()
 
         # Read the actual output file and verify contents
         actual_output = output_config_path.read_text()
         assert actual_output == expected_combined
         mock_restart.assert_called_once()
+
+    @patch.object(Supervisor, "restart_nginx")
+    def test_setup_nginx_https_config_rolls_back_when_rejected(self, mock_restart, temp_dir):
+        """An unloadable base+HTTPS config must not be restarted into: the HTTPS half
+        carries the app upstreams, and one that does not resolve yet makes nginx refuse to
+        start, taking port 80 and the ACME webroot down with it."""
+        base_config_path = temp_dir / "base.conf"
+        https_config_path = temp_dir / "https.conf"
+        output_config_path = temp_dir / "nginx.conf"
+        base_config = "# Base configuration\nserver { listen 80; }"
+        base_config_path.write_text(base_config)
+        https_config_path.write_text("upstream app { server does-not-resolve:8090; }")
+
+        supervisor = Supervisor(
+            nginx_conf_path=str(output_config_path),
+            nginx_base_conf_path=str(base_config_path),
+            nginx_https_conf_path=str(https_config_path),
+        )
+
+        with patch.object(supervisor, "nginx_config_is_valid", return_value=False):
+            with pytest.raises(Exception, match="nginx rejected"):
+                supervisor.setup_nginx_https_config()
+
+        assert output_config_path.read_text() == base_config
+        mock_restart.assert_not_called()
 
 
 # CertbotWrapper Tests
@@ -1233,6 +1276,96 @@ class TestCertificateManagerIntegration:
 
         # Should not raise exception, just log error
         manager.manage_cert_creation_and_renewal()
+
+    def test_renewal_due_cert_is_serviceable_but_not_valid(
+        self, temp_dir, renewal_due_cert, expired_certificate, mock_private_key
+    ):
+        """Inside the renewal window a cert is still servable; once expired it is not."""
+        manager = create_cert_manager(temp_dir)
+
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+        assert not manager.is_cert_valid()
+        assert manager.is_cert_serviceable()
+
+        manager.save_certificate_and_key(expired_certificate, mock_private_key)
+        assert not manager.is_cert_serviceable()
+
+    def test_startup_serves_renewal_due_cert(self, temp_dir, renewal_due_cert, mock_private_key):
+        """A boot inside the renewal window must bring HTTPS up from the installed cert
+        rather than waiting on a renewal that may be impossible."""
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+
+        with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_setup:
+            with patch.object(manager, "emit_new_cert_event"):
+                with patch.object(manager, "manage_cert_creation_and_renewal"):
+                    manager.startup_init()
+
+        mock_setup.assert_called_once()
+
+    def test_startup_serves_cert_when_event_emission_fails(
+        self, temp_dir, renewal_due_cert, mock_private_key
+    ):
+        """A failed RTMR3 event must not cost the listener: HTTPS is configured first."""
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+
+        with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_setup:
+            with patch.object(manager, "emit_new_cert_event", side_effect=Exception("no dstack")):
+                with patch.object(manager, "manage_cert_creation_and_renewal"):
+                    manager.startup_init()
+
+        mock_setup.assert_called_once()
+
+    def test_renewal_failure_serves_installed_cert_once(
+        self, temp_dir, renewal_due_cert, mock_private_key
+    ):
+        """A failed renewal falls back to the installed cert, and repeated failures do not
+        restart nginx again and drop live connections."""
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+
+        with patch.object(
+            manager, "create_or_renew_certificate", side_effect=Exception("acme unreachable")
+        ):
+            with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_setup:
+                manager.manage_cert_creation_and_renewal()
+                manager.manage_cert_creation_and_renewal()
+
+        assert mock_setup.call_count == 1
+
+    def test_successful_renewal_reloads_nginx_after_a_fallback(
+        self, temp_dir, renewal_due_cert, mock_private_key
+    ):
+        """The idempotence flag must never block the reload that loads a fresh cert."""
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(renewal_due_cert, mock_private_key)
+
+        with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_setup:
+            with patch.object(
+                manager, "create_or_renew_certificate", side_effect=Exception("acme unreachable")
+            ):
+                manager.manage_cert_creation_and_renewal()
+            assert mock_setup.call_count == 1
+
+            with patch.object(manager, "create_or_renew_certificate"):
+                manager.manage_cert_creation_and_renewal()
+            assert mock_setup.call_count == 2
+
+    def test_renewal_failure_with_expired_cert_leaves_https_down(
+        self, temp_dir, expired_certificate, mock_private_key
+    ):
+        """Nothing servable on disk means HTTPS stays down until renewal succeeds."""
+        manager = create_cert_manager(temp_dir)
+        manager.save_certificate_and_key(expired_certificate, mock_private_key)
+
+        with patch.object(
+            manager, "create_or_renew_certificate", side_effect=Exception("acme unreachable")
+        ):
+            with patch.object(manager.supervisor, "setup_nginx_https_config") as mock_setup:
+                manager.manage_cert_creation_and_renewal()
+
+        mock_setup.assert_not_called()
 
     def test_startup_init_dev_mode_with_valid_cert(
         self, temp_dir, mock_certificate, mock_private_key
