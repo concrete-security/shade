@@ -1592,6 +1592,55 @@ class TestCertificateManagerIntegration:
         mock_day.at.assert_called_with("00:00")
         mock_at.do.assert_called_once()
 
+    @patch("schedule.every")
+    @patch("time.sleep")
+    def test_run_loop_retries_https_bring_up(self, mock_sleep, mock_schedule, temp_dir):
+        """The main loop must retry bringing HTTPS up, not wait for the daily job.
+
+        An app upstream that has not started yet makes nginx reject the combined config at
+        boot; without a loop-level retry the CVM would serve no TLS until the next daily
+        renewal run, hours later.
+        """
+        mock_day = Mock()
+        mock_at = Mock()
+        mock_day.at.return_value = mock_at
+        mock_schedule.return_value.day = mock_day
+        mock_sleep.side_effect = [None, KeyboardInterrupt()]
+
+        manager = create_cert_manager(temp_dir)
+
+        with patch.object(manager, "startup_init"):
+            with patch.object(manager, "ensure_https_configured") as mock_ensure:
+                with patch("schedule.run_pending"):
+                    try:
+                        manager.run()
+                    except KeyboardInterrupt:
+                        pass
+
+        assert mock_ensure.call_count >= 1
+
+    @patch("schedule.every")
+    @patch("time.sleep")
+    def test_run_loop_survives_https_bring_up_failure(self, mock_sleep, mock_schedule, temp_dir):
+        """A failing bring-up must not kill the loop that will retry it."""
+        mock_day = Mock()
+        mock_at = Mock()
+        mock_day.at.return_value = mock_at
+        mock_schedule.return_value.day = mock_day
+        mock_sleep.side_effect = [None, KeyboardInterrupt()]
+
+        manager = create_cert_manager(temp_dir)
+
+        with patch.object(manager, "startup_init"):
+            with patch.object(
+                manager, "ensure_https_configured", side_effect=Exception("nginx rejected")
+            ):
+                with patch("schedule.run_pending"):
+                    try:
+                        manager.run()
+                    except KeyboardInterrupt:
+                        pass  # reached the second sleep, so the loop kept going
+
     def test_force_delete_cert_files_production_letsencrypt_prod(
         self, temp_dir, mock_letsencrypt_prod_cert, mock_private_key
     ):
