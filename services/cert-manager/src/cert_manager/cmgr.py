@@ -343,6 +343,12 @@ class CertificateManager:
         """
         if self._https_configured or not self.is_cert_serviceable():
             return
+        # Measure the certificate into RTMR3 before serving it. The attestation verifier
+        # rejects a session whose certificate is absent from the event log
+        # (`certificate_not_in_event_log`), so a certificate served without this produces a
+        # CVM that looks healthy and cannot be attested. Failing here leaves
+        # _https_configured False, so the caller's next pass retries both steps together.
+        self.emit_new_cert_event()
         self.supervisor.setup_nginx_https_config()
         self._https_configured = True
 
@@ -616,14 +622,12 @@ class CertificateManager:
         except Exception as e:
             logger.error(f"Failed to check/delete Let's Encrypt staging certificate: {e}")
 
-        # If a cert that can still terminate TLS is on disk, serve it and record it in
-        # RTMR3. A renewal-due cert counts: renewal can fail for reasons the guest cannot
-        # fix, and gating HTTPS on it takes the CVM offline entirely. HTTPS is configured
-        # before the event is emitted so a failed emission cannot keep the listener down.
+        # If a cert that can still terminate TLS is on disk, serve it. A renewal-due cert
+        # counts: renewal can fail for reasons the guest cannot fix, and gating HTTPS on it
+        # takes the CVM offline entirely. ensure_https_configured records the certificate in
+        # RTMR3 as part of bringing it up, and the main loop retries on failure.
         try:
-            if self.is_cert_serviceable():
-                self.ensure_https_configured()
-                self.emit_new_cert_event()
+            self.ensure_https_configured()
         except Exception as e:
             logger.error(f"Failed to bring up HTTPS at startup: {e}")
 
