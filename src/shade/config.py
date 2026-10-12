@@ -37,6 +37,9 @@ class RouteConfig(BaseModel):
     auth_required: bool = False  # requires auth plugin enabled
     cors: bool = True  # inherit CORS settings
     websocket: bool = False  # opt-in WebSocket upgrade proxying
+    strip_prefix: bool = False  # strip location prefix before proxying to upstream
+    allow_iframe: bool = False  # strip upstream frame-ancestors/X-Frame-Options to allow embedding
+    forward_tls_ekm: bool = False  # inject signed TLS EKM header for sender-constrained routes
 
     @field_validator("path")
     @classmethod
