@@ -189,6 +189,12 @@ The generator:
 
 Framework images are pinned in `src/shade/versions.py`.
 
+The certificate manager forwards nginx and certificate logs in chunks of at most
+65,536 characters. It splits oversized records and follows Supervisor log rotation.
+Supervisor retains a 10 MiB current log and two backups for each process log and its
+own log. These diagnostic logs can lose older entries when rotation exceeds the
+forwarder's output rate.
+
 ## Local Development
 
 The checked-in root compose files are for repository development and integration

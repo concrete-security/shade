@@ -10,6 +10,10 @@ import threading
 from typing import Dict, TextIO
 
 
+MAX_LOG_CHUNK_CHARS = 65536
+MAX_LOG_CHUNKS_PER_PASS = 1024
+
+
 class ProcessLogger:
     def __init__(self, log_files: Dict[str, str]):
         """
@@ -42,19 +46,45 @@ class ProcessLogger:
         if process_name not in self.file_handles:
             return
 
-        file_handle = self.file_handles[process_name]
-
         while self.running:
             try:
-                lines = file_handle.readlines()
-                for line in lines:
-                    print(f"[{process_name}] {line}", end="", flush=True)
+                file_handle = self.file_handles[process_name]
+                if os.fstat(file_handle.fileno()).st_size < file_handle.tell():
+                    file_handle.seek(0)
+                for _ in range(MAX_LOG_CHUNKS_PER_PASS):
+                    line = file_handle.readline(MAX_LOG_CHUNK_CHARS)
+                    if not line:
+                        self._reopen_rotated_log(process_name)
+                        break
+                    # Split oversized records instead of retaining an entire line.
+                    print(
+                        f"[{process_name}] {line}",
+                        end="" if line.endswith("\n") else "\n",
+                        flush=True,
+                    )
 
             except Exception as e:
                 print(f"[proc_logger] Error reading {process_name}: {e}", flush=True)
 
             finally:
                 time.sleep(1)
+
+    def _reopen_rotated_log(self, process_name: str):
+        """Follow the current log after draining the previous file."""
+        file_handle = self.file_handles[process_name]
+        try:
+            current_stat = os.stat(self.log_files[process_name])
+        except FileNotFoundError:
+            return  # Supervisor can temporarily remove the path during rotation.
+        opened_stat = os.fstat(file_handle.fileno())
+        if (current_stat.st_dev, current_stat.st_ino) == (
+            opened_stat.st_dev,
+            opened_stat.st_ino,
+        ):
+            return
+        replacement = open(self.log_files[process_name], "r", encoding="utf-8", errors="ignore")
+        self.file_handles[process_name] = replacement
+        file_handle.close()
 
     def start(self):
         """Start monitoring all log files."""

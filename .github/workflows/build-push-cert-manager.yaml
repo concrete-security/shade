@@ -137,7 +137,9 @@ jobs:
   update-digest:
     name: Update Digest References
     needs: [build-and-push, provenance]
-    if: always() && needs.build-and-push.result == 'success'
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.build-and-push.result == 'success' && needs.provenance.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
