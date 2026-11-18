@@ -7,7 +7,7 @@ Maps framework versions to container image references.
 VERSIONS: dict[str, dict[str, str]] = {
     "0.1.0": {
         "cert-manager": "ghcr.io/concrete-security/shade-cert-manager@sha256:58cb376fa00b2e79b61daefd5bbf5b6cbc8cfe5c92a825497d6c8cbf959578b7",
-        "attestation-service": "ghcr.io/concrete-security/shade-attestation-service:sha-339842a",
+        "attestation-service": "ghcr.io/concrete-security/shade-attestation-service@sha256:165bca85d94d24ca521c4a0450c62dd9db5437932d9aaea772c33429cf03d702",
         "auth-service": "ghcr.io/concrete-security/shade-auth-service:sha-950ddc3",
     },
 }
