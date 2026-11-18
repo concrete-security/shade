@@ -1,12 +1,18 @@
 # Combined Nginx and Certificate Manager Dockerfile
 
 FROM nginx:1.30.7-alpine3.24@sha256:bef154735288bc38d99fac41ae63730684bcc661503673a04a0f9bc526ba8598 AS nginx-base
+# Use signed, exact Alpine security fixes while the stable branch catches up.
+RUN printf '%s\n' '@alpine-security https://dl-cdn.alpinelinux.org/alpine/edge/main' >> /etc/apk/repositories \
+    && apk add --no-cache \
+        libxml2@alpine-security=2.13.9-r3 \
+        musl@alpine-security=1.2.6-r6 \
+        musl-utils@alpine-security=1.2.6-r6
 FROM nginx-base AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
     gcc~=15.2 \
-    musl-dev~=1.2 \
+    musl-dev@alpine-security=1.2.6-r6 \
     make~=4.4 \
     openssl-dev~=3.5 \
     pcre2-dev~=10.49
@@ -60,9 +66,10 @@ WORKDIR /app
 COPY pyproject.toml /app/
 COPY src/ /app/src/
 COPY uv.lock /app/
-RUN apk add --no-cache --virtual .build-deps gcc musl-dev cargo rust && \
+RUN apk add --no-cache musl-dev@alpine-security=1.2.6-r6 && \
+    apk add --no-cache --virtual .build-deps gcc cargo rust && \
     uv sync --locked --no-cache && \
-    apk del .build-deps
+    apk del .build-deps musl-dev
 
 # Copy app files
 COPY entrypoint.sh /app/
