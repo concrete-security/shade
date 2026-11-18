@@ -4,6 +4,7 @@ import pytest
 
 from shade.config import (
     AppRef,
+    AttestationConfig,
     AuthPlugin,
     CorsConfig,
     CvmConfig,
@@ -14,6 +15,7 @@ from shade.config import (
     ShadeConfig,
 )
 from shade.generator import generate
+from shade.verify import extract_env_var_names
 
 
 def _minimal_compose(services: dict | None = None) -> dict:
@@ -45,6 +47,28 @@ class TestGenerateBasic:
         assert "proxy" in result["networks"]
         assert "attestation" in result["networks"]
         assert "auth" not in result["networks"]
+        assert all(
+            not item.startswith("SHADE_CERTIFICATE_BINDING=")
+            for name in ("nginx-cert-manager", "attestation-service")
+            for item in result["services"][name]["environment"]
+        )
+
+    def test_report_data_v2_generates_only_literal_service_settings(self):
+        config = ShadeConfig(
+            app=AppRef(name="my-app"),
+            cvm=CvmConfig(
+                domain="example.com",
+                attestation=AttestationConfig(certificate_binding="report-data-v2"),
+            ),
+        )
+        result = generate(config, _minimal_compose())
+
+        for name in ("nginx-cert-manager", "attestation-service"):
+            assert (
+                "SHADE_CERTIFICATE_BINDING=report-data-v2"
+                in result["services"][name]["environment"]
+            )
+        assert "SHADE_CERTIFICATE_BINDING" not in extract_env_var_names(result)
 
     def test_user_service_ports_stripped(self):
         compose = {"services": {"my-app": {"image": "python:3.11", "ports": ["8000:8000"]}}}

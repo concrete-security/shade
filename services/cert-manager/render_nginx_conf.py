@@ -10,6 +10,7 @@ Reads template files and substitutes variables:
 - EXTRA_UPSTREAMS: Pre-rendered nginx upstream blocks (default: "")
 - EXTRA_LOCATIONS: Pre-rendered nginx location blocks (default: "")
 - NGINX_MAX_BODY_SIZE: client_max_body_size value (default: "" = nginx default 1M)
+- SHADE_CERTIFICATE_BINDING: report-data-v2 disables TLS session resumption
 
 When UPSTREAM_HOST is set (backward compat mode), the renderer auto-generates
 an upstream and catch-all location, prepending/appending to EXTRA_UPSTREAMS/EXTRA_LOCATIONS.
@@ -131,6 +132,11 @@ def main():
     cors_origins = os.environ.get("CORS_ORIGINS", "")
     dev_mode = os.environ.get("DEV_MODE", "false").lower() == "true"
     auth_enabled = os.environ.get("AUTH_ENABLED", "true").lower() == "true"
+    binding = os.environ.get("SHADE_CERTIFICATE_BINDING", "rtmr3-event")
+    if binding not in ("rtmr3-event", "report-data-v2"):
+        raise ValueError("invalid SHADE_CERTIFICATE_BINDING")
+    if binding == "report-data-v2" and dev_mode:
+        raise ValueError("report-data-v2 requires production TDX key derivation")
 
     # Backward compat: UPSTREAM_HOST/PORT for Phase 1 (cvm/) usage
     upstream_host = os.environ.get("UPSTREAM_HOST", "")
@@ -179,6 +185,11 @@ def main():
         "EXTRA_UPSTREAMS": extra_upstreams,
         "EXTRA_LOCATIONS": extra_locations,
         "CLIENT_MAX_BODY_SIZE": client_max_body_size,
+        "TLS_RESUMPTION": (
+            "    ssl_session_cache off;\n    ssl_session_tickets off;"
+            if binding == "report-data-v2"
+            else ""
+        ),
     }
 
     # Render base.conf

@@ -41,9 +41,9 @@ FROM nginx-base
 COPY --from=builder /nginx-${NGINX_VERSION}/objs/ngx_http_ekm_module.so /usr/lib/nginx/modules/
 
 # Load Nginx EKM module in main nginx.conf (must be at top level)
-# Make EKM_SHARED_SECRET env variable available to nginx
+# Make the EKM key and measured certificate binding mode available to nginx
 RUN sed -i '1i load_module /usr/lib/nginx/modules/ngx_http_ekm_module.so;' /etc/nginx/nginx.conf && \
-    sed -i '2i env EKM_SHARED_SECRET;' /etc/nginx/nginx.conf
+    sed -i '2i env EKM_SHARED_SECRET;\nenv SHADE_CERTIFICATE_BINDING;' /etc/nginx/nginx.conf
 
 # Test: verify that the module file exists and nginx config is valid
 RUN test -f /usr/lib/nginx/modules/ngx_http_ekm_module.so && \

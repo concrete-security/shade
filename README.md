@@ -153,6 +153,9 @@ counts for services, networks, and routes.
 - `cvm.tls.mode`: `letsencrypt` or `self-signed`
 - `cvm.tls.letsencrypt_staging`: use Let's Encrypt staging
 - `cvm.tls.letsencrypt_account_version`: deterministic account key namespace
+- `cvm.attestation.certificate_binding`: legacy `rtmr3-event` by default. Set
+  `report-data-v2` for a dstack guest without application runtime events and use
+  an Atlas version that verifies the selected mode.
 - `plugins.auth.enabled`: enable auth service and `/_auth` integration
 
 ### Route Fields
@@ -188,6 +191,11 @@ The generator:
 - escapes nginx/template `$` variables so Docker Compose does not interpolate them prematurely
 
 Framework images are pinned in `src/shade/versions.py`.
+
+For `report-data-v2`, pass the locally built compose file to
+`shade policy generate --domain <domain> --compose docker-compose.shade.yml`.
+The policy generator checks that the deployed compose matches and reads the
+binding mode from the local copy.
 
 The certificate manager forwards nginx and certificate logs in chunks of at most
 65,536 characters. It splits oversized records and follows Supervisor log rotation.

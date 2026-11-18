@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import struct
 import secrets
 import time
@@ -23,6 +24,17 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 HEADER_TLS_EKM_CHANNEL_BINDING = "X-TLS-EKM-Channel-Binding"
+CERTIFICATE_BINDING = os.getenv("SHADE_CERTIFICATE_BINDING", "rtmr3-event")
+REPORT_DATA_V2 = "report-data-v2"
+_CERTIFICATE_HMAC_CONTEXT = b"shade-tls-certificate-v2\0"
+_REPORT_DATA_CONTEXT = b"shade-tdx-report-data-v2\0"
+_SIGNED_CERTIFICATE_HEADER = re.compile(r"2:([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{64})")
+
+if CERTIFICATE_BINDING not in ("rtmr3-event", REPORT_DATA_V2):
+    raise RuntimeError("invalid SHADE_CERTIFICATE_BINDING")
+
+# A v2 workload takes both the key and the quote from its own guest.
+DSTACK_ENDPOINT = "/var/run/dstack.sock" if CERTIFICATE_BINDING == REPORT_DATA_V2 else None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -41,9 +53,7 @@ class QuoteRequest(BaseModel):
         """Validate that nonce_hex is a 64-character hex string (32 bytes)."""
         if len(v) != 64:
             raise ValueError("nonce_hex must be exactly 64 characters (32 bytes)")
-        try:
-            bytes.fromhex(v)
-        except ValueError:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", v):
             raise ValueError("nonce_hex must be a valid hexadecimal string")
         return v
 
@@ -72,7 +82,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Initializing async dstack client...")
     try:
-        dstack_client = AsyncDstackClient()
+        dstack_client = AsyncDstackClient(DSTACK_ENDPOINT)
     except Exception as e:
         # This will cause HTTP 500 errors when getting quotes,
         # but allows the app to start for testing the service in a non-TEE environment
@@ -98,11 +108,13 @@ def _get_ekm_hmac_secret() -> str:
     try:
         from dstack_sdk import DstackClient
 
-        client = DstackClient()
+        client = DstackClient(DSTACK_ENDPOINT)
         derived = client.get_key("ekm/hmac-key/v1").decode_key().hex()
         logger.info("EKM HMAC key derived from TEE (dstack)")
         return derived
     except Exception as e:
+        if CERTIFICATE_BINDING == REPORT_DATA_V2:
+            raise RuntimeError("report-data-v2 requires a TDX-derived EKM key") from e
         logger.warning(
             f"dstack key derivation failed ({e}), falling back to EKM_SHARED_SECRET env var"
         )
@@ -151,7 +163,21 @@ def validate_and_extract_ekm(signed_header: str, secret: str) -> str:
     return ekm_hex
 
 
-def compute_report_data(nonce_hex: str, ekm_hex: str) -> bytes:
+def validate_and_extract_certificate_binding(signed_header: str, secret: str) -> tuple[str, bytes]:
+    """Authenticate the TLS exporter's leaf hash before requesting a quote."""
+    match = _SIGNED_CERTIFICATE_HEADER.fullmatch(signed_header)
+    if match is None:
+        raise ValueError("invalid report-data-v2 header format")
+    ekm_hex, cert_hex, received_hmac = match.groups()
+    cert_sha256 = bytes.fromhex(cert_hex)
+    signed_data = _CERTIFICATE_HMAC_CONTEXT + bytes.fromhex(ekm_hex) + cert_sha256
+    expected_hmac = hmac.new(secret.encode("utf-8"), signed_data, hashlib.sha256).hexdigest()
+    if not secrets.compare_digest(received_hmac, expected_hmac):
+        raise ValueError("report-data-v2 HMAC validation failed")
+    return ekm_hex, cert_sha256
+
+
+def compute_report_data(nonce_hex: str, ekm_hex: str, cert_sha256: bytes | None = None) -> bytes:
     """
     Compute report_data from nonce and EKM using SHA512.
 
@@ -162,6 +188,7 @@ def compute_report_data(nonce_hex: str, ekm_hex: str) -> bytes:
     Args:
         nonce_hex: 64-character hex string (32 bytes)
         ekm_hex: 64-character hex string (32 bytes)
+        cert_sha256: Authenticated 32-byte digest of the TLS session leaf for report-data-v2.
 
     Returns:
         64-byte SHA512 hash suitable for TDX report_data
@@ -172,6 +199,12 @@ def compute_report_data(nonce_hex: str, ekm_hex: str) -> bytes:
         raise ValueError("ekm_hex must be exactly 64 hex characters (32 bytes)")
     nonce = bytes.fromhex(nonce_hex)
     ekm = bytes.fromhex(ekm_hex)
+    if len(nonce) != 32 or len(ekm) != 32:
+        raise ValueError("nonce and EKM must each decode to 32 bytes")
+    if cert_sha256 is not None:
+        if len(cert_sha256) != 32:
+            raise ValueError("certificate SHA-256 must be exactly 32 bytes")
+        return hashlib.sha512(_REPORT_DATA_CONTEXT + nonce + ekm + cert_sha256).digest()
     return hashlib.sha512(nonce + ekm).digest()
 
 
@@ -241,16 +274,11 @@ async def post_tdx_quote(request: Request, data: QuoteRequest):
 
     logger.info("TDX quote with report data requested")
 
-    # This header is forwarded by Nginx (or other proxies that terminates TLS) with HMAC
-    # signature.
-    # Format: "{ekm_hex}:{hmac_hex}" where HMAC = HMAC-SHA256(ekm_hex, EKM_SHARED_SECRET)
-    # The signature is validated before trusting the EKM value to prevent header forgery.
-    # In order for this to work, the entity sending the header (e.g., Nginx) and this
-    # service must run in the same trusted execution environment (TLS terminated inside
-    # the TEE).
-    ekm_header = request.headers.get(HEADER_TLS_EKM_CHANNEL_BINDING)
+    # Shade's in-TEE TLS terminator sets this header to authenticated data
+    # from the current TLS session, overriding any header supplied by the client.
+    ekm_headers = request.headers.getlist(HEADER_TLS_EKM_CHANNEL_BINDING)
 
-    if not ekm_header:
+    if len(ekm_headers) != 1 or not ekm_headers[0]:
         logger.error("Missing EKM header for TLS session binding")
         raise HTTPException(
             status_code=400,
@@ -265,8 +293,14 @@ async def post_tdx_quote(request: Request, data: QuoteRequest):
             detail="Server configuration error",
         )
 
+    cert_sha256 = None
     try:
-        ekm_hex = validate_and_extract_ekm(ekm_header, EKM_SHARED_SECRET)
+        if CERTIFICATE_BINDING == REPORT_DATA_V2:
+            ekm_hex, cert_sha256 = validate_and_extract_certificate_binding(
+                ekm_headers[0], EKM_SHARED_SECRET
+            )
+        else:
+            ekm_hex = validate_and_extract_ekm(ekm_headers[0], EKM_SHARED_SECRET)
     except ValueError as e:
         logger.error(f"EKM validation failed: {e}")
         raise HTTPException(
@@ -276,7 +310,7 @@ async def post_tdx_quote(request: Request, data: QuoteRequest):
 
     logger.info("TDX quote requested using EKM session binding")
     try:
-        report_data = compute_report_data(data.nonce_hex, ekm_hex)
+        report_data = compute_report_data(data.nonce_hex, ekm_hex, cert_sha256)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid hex encoding: {e}")
 

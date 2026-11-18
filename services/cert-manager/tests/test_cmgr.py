@@ -163,7 +163,7 @@ def expired_certificate(mock_private_key):
     return cert
 
 
-def create_cert_manager(temp_cert_dir, dev_mode=True, letsencrypt_staging=True):
+def create_cert_manager(temp_cert_dir, dev_mode=True, letsencrypt_staging=True, **kwargs):
     """Helper function to create a CertificateManager instance for testing."""
     manager = CertificateManager(
         domain="test.example.com",
@@ -173,6 +173,7 @@ def create_cert_manager(temp_cert_dir, dev_mode=True, letsencrypt_staging=True):
         letsencrypt_account_version="v1",
         cert_path=temp_cert_dir,
         acme_path=temp_cert_dir / "acme",
+        **kwargs,
     )
     return manager
 
@@ -632,6 +633,14 @@ class TestCertificateManager:
         args, _ = mock_client.emit_event.call_args
         assert args[0] == "New TLS Certificate"
         assert len(args[1]) == 64  # SHA256 hash length
+
+    @patch("cert_manager.cmgr.DstackClient")
+    def test_report_data_v2_skips_legacy_event(self, mock_dstack, temp_dir):
+        manager = create_cert_manager(
+            temp_dir, dev_mode=False, certificate_binding="report-data-v2"
+        )
+        manager.emit_new_cert_event()
+        mock_dstack.assert_not_called()
 
     @patch.object(CertificateManager, "generate_deterministic_key")
     @patch.object(CertificateManager, "create_self_signed_cert")

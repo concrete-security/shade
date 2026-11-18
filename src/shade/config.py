@@ -4,7 +4,7 @@ Defines the shade.yml schema using Pydantic v2 models.
 """
 
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 import yaml
 from pydantic import BaseModel, field_validator, model_validator
@@ -14,6 +14,9 @@ RESERVED_PATHS = {"/health", "/tdx_quote", "/_auth", "/debug/ekm"}
 
 # Framework-internal networks that user services cannot join
 INTERNAL_NETWORKS = {"attestation", "auth"}
+
+CERTIFICATE_BINDING_ENV = "SHADE_CERTIFICATE_BINDING"
+REPORT_DATA_V2 = "report-data-v2"
 
 
 class AppRef(BaseModel):
@@ -96,6 +99,12 @@ class NginxConfig(BaseModel):
         return v
 
 
+class AttestationConfig(BaseModel, extra="forbid"):
+    """Certificate binding for TDX attestation."""
+
+    certificate_binding: Literal["rtmr3-event", "report-data-v2"] = "rtmr3-event"
+
+
 class CvmConfig(BaseModel):
     """CVM (Confidential VM) configuration."""
 
@@ -103,6 +112,7 @@ class CvmConfig(BaseModel):
     cors: CorsConfig = CorsConfig()
     tls: TlsConfig = TlsConfig()
     nginx: NginxConfig = NginxConfig()
+    attestation: AttestationConfig = AttestationConfig()
     routes: list[RouteConfig] = []
 
     @model_validator(mode="after")

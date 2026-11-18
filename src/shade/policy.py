@@ -11,6 +11,10 @@ import ssl
 from typing import Any
 from urllib import error, request
 
+import yaml
+
+from shade.config import CERTIFICATE_BINDING_ENV, REPORT_DATA_V2
+
 VALID_TCB_STATUSES = [
     "UpToDate",
     "OutOfDate",
@@ -175,6 +179,39 @@ def fetch_cvm_measurements(domain: str, *, timeout: float = 30.0) -> dict[str, A
 # ---------------------------------------------------------------------------
 
 
+def _report_data_v2_selected(docker_compose_file: str) -> bool:
+    """Recognize the mode only from a literal value in both local services."""
+    compose = yaml.safe_load(docker_compose_file)
+    services = compose.get("services", {}) if isinstance(compose, dict) else {}
+    if not isinstance(services, dict):
+        return False
+
+    mode_values = []
+    for name in ("nginx-cert-manager", "attestation-service"):
+        service = services.get(name, {})
+        env = service.get("environment", {}) if isinstance(service, dict) else {}
+        if isinstance(env, dict) and CERTIFICATE_BINDING_ENV in env:
+            mode_values.append([env[CERTIFICATE_BINDING_ENV]])
+        elif isinstance(env, list):
+            mode_values.append(
+                [
+                    item.partition("=")[2]
+                    for item in env
+                    if isinstance(item, str) and item.partition("=")[0] == CERTIFICATE_BINDING_ENV
+                ]
+            )
+        else:
+            mode_values.append([])
+
+    if not any(mode_values):
+        return False
+    if mode_values != [[REPORT_DATA_V2], [REPORT_DATA_V2]]:
+        raise ValueError(
+            f"both Shade services must use literal {CERTIFICATE_BINDING_ENV}={REPORT_DATA_V2}"
+        )
+    return True
+
+
 def generate_atlas_policy(
     domain: str | None = None,
     *,
@@ -213,7 +250,8 @@ def generate_atlas_policy(
         domain: CVM domain to fetch measurements from (required for production).
         docker_compose_file: Local docker-compose content to verify against
             the CVM's reported app_compose.docker_compose_file. Recommended
-            for production — raises ValueError on mismatch.
+            for production — raises ValueError on mismatch. Required to
+            select report-data-v2.
         allowed_tcb_status: Allowed TCB status values. Defaults to ["UpToDate"].
         disable_runtime_verification: Skip runtime checks (dev mode).
 
@@ -252,6 +290,8 @@ def generate_atlas_policy(
                     "docker_compose_file than the one provided locally. "
                     "The CVM may be running different code than expected."
                 )
+            if _report_data_v2_selected(docker_compose_file):
+                policy["certificate_binding"] = REPORT_DATA_V2
 
         policy["expected_bootchain"] = {
             "mrtd": measurements["mrtd"],

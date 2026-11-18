@@ -50,7 +50,13 @@ class CertificateManager:
         force_rm_cert_files: bool = False,
         fqdn_resolve_wait_seconds: int = 10,
         fqdn_resolve_max_tries: int = 60,
+        certificate_binding: str = "rtmr3-event",
     ):
+        if certificate_binding not in ("rtmr3-event", "report-data-v2"):
+            raise ValueError("invalid certificate binding")
+        if certificate_binding == "report-data-v2" and dev_mode:
+            raise ValueError("report-data-v2 requires production TDX key derivation")
+        self.certificate_binding = certificate_binding
         self.domain = domain
         self.dev_mode = dev_mode
         self.cert_email = cert_email
@@ -93,7 +99,8 @@ class CertificateManager:
                 return b"\x01" * 32
 
             # Initialize dstack client
-            dstack_client = DstackClient()
+            endpoint = "/var/run/dstack.sock" if self.certificate_binding == "report-data-v2" else None
+            dstack_client = DstackClient(endpoint)
             logger.info("dstack SDK initialized successfully")
             # Use dstack SDK to get deterministic 32-byte key material
             result = dstack_client.get_key(f"{key_path}")
@@ -465,8 +472,11 @@ class CertificateManager:
     def emit_new_cert_event(self):
         """Emit new cert event in RTMR3.
 
+        Report-data-v2 binds the TLS certificate when a quote is requested.
         This will only log the cert hash in dev mode.
         """
+        if self.certificate_binding == "report-data-v2":
+            return
         cert_file = self.cert_path / self.CERT_FILENAME
         with open(cert_file, "rb") as f:
             certs = x509.load_pem_x509_certificates(f.read())
