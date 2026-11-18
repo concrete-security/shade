@@ -1,25 +1,22 @@
 # Combined Nginx and Certificate Manager Dockerfile
 
-# nginx:1.29-alpine
-# TODO: Update NGINX_VERSION if changing nginx image version.
-# This stage is used to build the Nginx EKM module
-FROM nginx@sha256:61e01287e546aac28a3f56839c136b31f590273f3b41187a36f46f6a03bbfe22 AS builder
-
-# Define nginx version (must match runtime image)
-ENV NGINX_VERSION=1.29.2
+FROM nginx:1.30.7-alpine3.24@sha256:bef154735288bc38d99fac41ae63730684bcc661503673a04a0f9bc526ba8598 AS nginx-base
+FROM nginx-base AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
-    gcc~=14.2 \
+    gcc~=15.2 \
     musl-dev~=1.2 \
     make~=4.4 \
     openssl-dev~=3.5 \
-    pcre2-dev~=10.46 \
-    wget~=1.25
+    pcre2-dev~=10.49
 
-# Download nginx source matching the version
-RUN wget --progress=dot:giga "http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" && \
-    tar -xzvf nginx-${NGINX_VERSION}.tar.gz
+# Compile against the source release for the nginx version in the shared base.
+RUN archive="nginx-${NGINX_VERSION}.tar.gz" \
+    && curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+       --output "${archive}" "https://nginx.org/download/${archive}" \
+    && printf '%s  %s\n' '2565b5c837050e958f70fb0f73c48e2bca4542ad349fd356f46fb0c72610bc6e' "${archive}" | sha256sum -c - \
+    && tar -xzf "${archive}"
 
 # Copy module source
 COPY ngx_http_ekm_module /nginx-${NGINX_VERSION}/ngx_http_ekm_module
@@ -32,9 +29,7 @@ RUN ./configure --with-compat \
     make modules
 
 
-# nginx:1.29-alpine
-# TODO: Update NGINX_VERSION if changing nginx image version.
-FROM nginx@sha256:61e01287e546aac28a3f56839c136b31f590273f3b41187a36f46f6a03bbfe22
+FROM nginx-base
 
 # Copy compiled Nginx EKM module from builder
 COPY --from=builder /nginx-${NGINX_VERSION}/objs/ngx_http_ekm_module.so /usr/lib/nginx/modules/
@@ -56,7 +51,7 @@ COPY --from=ghcr.io/astral-sh/uv@sha256:f459f6f73a8c4ef5d69f4e6fbbdb8af751d6fa40
 EXPOSE 80 443
 
 # Install supervisor
-RUN apk add --no-cache supervisor~=4.2
+RUN apk add --no-cache supervisor=4.3.0-r1
 
 # Create app directory
 WORKDIR /app
