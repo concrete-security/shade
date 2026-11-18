@@ -38,7 +38,7 @@ services:
 
   # TDX Attestation service
   attestation-service:
-    image: ghcr.io/concrete-security/shade-attestation-service:sha-339842a
+    image: ghcr.io/concrete-security/shade-attestation-service:sha-f6a2911
     container_name: attestation-service
     environment:
       - HOST=0.0.0.0
