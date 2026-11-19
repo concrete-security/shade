@@ -7,7 +7,7 @@ with all framework services wired in.
 import copy
 import json
 
-from shade.config import ShadeConfig
+from shade.config import CERTIFICATE_BINDING_ENV, REPORT_DATA_V2, ShadeConfig
 from shade.versions import get_images
 
 
@@ -165,6 +165,11 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
         "FORCE_RM_CERT_FILES=false",
         "LOG_LEVEL=INFO",
     ]
+    attestation_env = ["HOST=0.0.0.0", "PORT=8080", "WORKERS=8"]
+    if config.cvm.attestation.certificate_binding == REPORT_DATA_V2:
+        binding = f"{CERTIFICATE_BINDING_ENV}={REPORT_DATA_V2}"
+        nginx_env.append(binding)
+        attestation_env.append(binding)
 
     if config.cvm.nginx.max_body_size:
         nginx_env.append(f"NGINX_MAX_BODY_SIZE={config.cvm.nginx.max_body_size}")
@@ -192,11 +197,7 @@ def generate(config: ShadeConfig, user_compose: dict) -> dict:
     result["services"]["attestation-service"] = {
         "image": images["attestation-service"],
         "container_name": "attestation-service",
-        "environment": [
-            "HOST=0.0.0.0",
-            "PORT=8080",
-            "WORKERS=8",
-        ],
+        "environment": attestation_env,
         "volumes": ["/var/run/dstack.sock:/var/run/dstack.sock"],
         "expose": ["8080"],
         "networks": ["attestation"],

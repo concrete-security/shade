@@ -11,6 +11,7 @@ server {
     # since using TLS EKM with Channel Binding, we require TLS 1.3
     # https://datatracker.ietf.org/doc/html/rfc9266
     ssl_protocols TLSv1.3;
+${TLS_RESUMPTION}
 
     # we want the attestation and following requests
     # to be part of the same TCP connection. This doesn't

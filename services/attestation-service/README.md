@@ -55,7 +55,25 @@ In dev/test environments without a dstack socket, the service falls back to the 
 4. Attestation service validates HMAC before trusting EKM
 5. Invalid signatures return HTTP 403 Forbidden
 
-This prevents attackers from forging EKM values even if they compromise the reverse proxy or bypass network isolation.
+The proxy is trusted to obtain the EKM from the TLS session it terminates. The
+MAC lets the backend reject unsigned data if a caller bypasses the proxy.
+
+### Report-data-v2
+
+Select `cvm.attestation.certificate_binding: report-data-v2` in `shade.yml` to
+bind the certificate in the quote rather than in a separate RTMR3 event. This
+mode requires the TDX-derived key. The nginx module obtains the SHA-256 digest
+of the TLS leaf on the current full TLS 1.3 connection and authenticates it
+together with that connection's EKM.
+
+- Internal header bytes are `2:<ekm-hex>:<leaf-sha256-hex>:<mac-hex>`, with
+  exactly 64 lowercase hex characters per field.
+- The MAC is HMAC-SHA256 over `b"shade-tls-certificate-v2\0" || EKM || leaf_sha256`.
+- The quoted report data is SHA-512 over
+  `b"shade-tdx-report-data-v2\0" || nonce || EKM || leaf_sha256`.
+
+Both services take the mode from the generated compose. A v2 quote request
+requires the v2 header, and the compatible verifier requires the v2 binding.
 
 ## Testing with Debug Endpoints
 

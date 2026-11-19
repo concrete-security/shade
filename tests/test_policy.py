@@ -6,6 +6,7 @@ import json
 from urllib import error
 
 import pytest
+import yaml
 
 from shade.policy import (
     PolicyFetchError,
@@ -364,3 +365,45 @@ def test_generate_atlas_policy_compose_mismatch(monkeypatch):
             "test.example.com",
             docker_compose_file="services:\n  app:\n    image: python:3.11\n",
         )
+
+
+@pytest.mark.parametrize(
+    ("local", "nginx_mode", "service_mode", "expected"),
+    [
+        (True, "report-data-v2", "report-data-v2", "report-data-v2"),
+        (False, "report-data-v2", "report-data-v2", None),
+        (True, "report-data-v2", "${SHADE_CERTIFICATE_BINDING}", None),
+        (True, "report-data-v2", None, None),
+    ],
+)
+def test_report_data_v2_requires_matching_literal_local_compose(
+    monkeypatch, local, nginx_mode, service_mode, expected
+):
+    compose = yaml.safe_dump(
+        {
+            "services": {
+                "nginx-cert-manager": {
+                    "environment": [f"SHADE_CERTIFICATE_BINDING={nginx_mode}"],
+                },
+                "attestation-service": {
+                    "environment": {"SHADE_CERTIFICATE_BINDING": service_mode},
+                },
+            },
+        }
+    )
+    measurements = {
+        "mrtd": "aa" * 48,
+        "rtmr0": "bb" * 48,
+        "rtmr1": "cc" * 48,
+        "rtmr2": "dd" * 48,
+        "os_image_hash": "ee" * 32,
+        "app_compose": {"docker_compose_file": compose},
+    }
+    monkeypatch.setattr("shade.policy.fetch_cvm_measurements", lambda *_: measurements)
+    local_compose = compose if local else None
+    if local and expected is None:
+        with pytest.raises(ValueError, match="both Shade services must use literal"):
+            generate_atlas_policy("test.example.com", docker_compose_file=local_compose)
+        return
+    policy = generate_atlas_policy("test.example.com", docker_compose_file=local_compose)
+    assert policy.get("certificate_binding") == expected

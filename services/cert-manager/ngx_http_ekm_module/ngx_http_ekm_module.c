@@ -15,12 +15,15 @@
 #include <ngx_event_openssl.h>
 #include <openssl/ssl.h>
 #include <openssl/hmac.h>
+#include <openssl/x509.h>
 
 #define MODULE_ENV_VAR "ekm_channel_binding"
 #define EKM_LENGTH 32
 #define EKM_LABEL "EXPORTER-Channel-Binding"
 #define EKM_LABEL_LEN 24
 #define EKM_HEX_LENGTH (EKM_LENGTH * 2)
+
+static const unsigned char cert_hmac_context[] = "shade-tls-certificate-v2";
 
 static ngx_int_t ngx_http_ekm_add_variable(ngx_conf_t *cf);
 static ngx_int_t ngx_http_ekm_get_variable(ngx_http_request_t *r,
@@ -84,14 +87,19 @@ ngx_http_ekm_get_variable(ngx_http_request_t *r,
     ngx_ssl_connection_t *ssl_conn;
     SSL *ssl;
     unsigned char ekm_raw[EKM_LENGTH];
+    unsigned char cert_sha256[EKM_LENGTH];
+    unsigned char cert_signed_data[sizeof(cert_hmac_context) + 2 * EKM_LENGTH];
     unsigned char hmac_raw[EKM_LENGTH];
     unsigned int hmac_len;
     unsigned char *output;
-    const uint8_t output_len = EKM_HEX_LENGTH + 1 + EKM_HEX_LENGTH; /* ekm_hex + ':' + hmac_hex */
+    unsigned char *cursor;
+    const unsigned char *signed_data = ekm_raw;
+    size_t signed_data_len = sizeof(ekm_raw);
+    size_t output_len = 2 * EKM_HEX_LENGTH + 1;
     const char *ekm_secret;
     size_t secret_len;
-
-    static const u_char hex_chars[] = "0123456789abcdef";
+    const char *binding;
+    ngx_flag_t report_data_v2;
 
     /* Initialize as not found */
     v->not_found = 1;
@@ -123,6 +131,15 @@ ngx_http_ekm_get_variable(ngx_http_request_t *r,
         return NGX_OK;
     }
 
+    binding = getenv("SHADE_CERTIFICATE_BINDING");
+    report_data_v2 = binding != NULL && strcmp(binding, "report-data-v2") == 0;
+    if (binding != NULL && !report_data_v2 && strcmp(binding, "rtmr3-event") != 0)
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "ekm: invalid certificate binding mode");
+        return NGX_OK;
+    }
+
     /* Get shared secret */
     ekm_secret = getenv("EKM_SHARED_SECRET");
     if (ekm_secret == NULL || (secret_len = strlen(ekm_secret)) == 0)
@@ -150,7 +167,40 @@ ngx_http_ekm_get_variable(ngx_http_request_t *r,
         return NGX_OK;
     }
 
-    /* Allocate single buffer: ekm_hex(64) + ':' + hmac_hex(64) = 129 */
+    if (report_data_v2)
+    {
+        X509 *leaf = SSL_get_certificate(ssl);
+        unsigned int digest_len;
+
+        /* A resumed handshake may not send a certificate at all. */
+        if (SSL_session_reused(ssl) || leaf == NULL ||
+            X509_digest(leaf, EVP_sha256(), cert_sha256, &digest_len) != 1 ||
+            digest_len != sizeof(cert_sha256))
+        {
+            ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                          "ekm: no usable certificate from a full TLS handshake");
+            return NGX_OK;
+        }
+
+        /* Include the domain separator's trailing NUL in the MAC. */
+        ngx_memcpy(cert_signed_data, cert_hmac_context, sizeof(cert_hmac_context));
+        ngx_memcpy(cert_signed_data + sizeof(cert_hmac_context), ekm_raw, sizeof(ekm_raw));
+        ngx_memcpy(cert_signed_data + sizeof(cert_hmac_context) + sizeof(ekm_raw),
+                   cert_sha256, sizeof(cert_sha256));
+        signed_data = cert_signed_data;
+        signed_data_len = sizeof(cert_signed_data);
+        output_len += 2 + EKM_HEX_LENGTH + 1; /* '2:' and cert_hex + ':' */
+    }
+
+    if (HMAC(EVP_sha256(), ekm_secret, secret_len,
+             signed_data, signed_data_len, hmac_raw, &hmac_len) == NULL ||
+        hmac_len != sizeof(hmac_raw))
+    {
+        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
+                      "ekm: HMAC calculation failed");
+        return NGX_OK;
+    }
+
     output = ngx_pnalloc(r->pool, output_len);
     if (output == NULL)
     {
@@ -159,33 +209,20 @@ ngx_http_ekm_get_variable(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
-    /* Convert EKM to hex */
-    for (size_t i = 0; i < EKM_LENGTH; i++)
+    cursor = output;
+    if (report_data_v2)
     {
-        output[i * 2] = hex_chars[(ekm_raw[i] >> 4) & 0x0f];
-        output[i * 2 + 1] = hex_chars[ekm_raw[i] & 0x0f];
+        *cursor++ = '2';
+        *cursor++ = ':';
     }
-
-    /* Separator */
-    output[64] = ':';
-
-    /* Compute HMAC-SHA256 over EKM */
-    HMAC(EVP_sha256(), ekm_secret, secret_len,
-         ekm_raw, EKM_LENGTH, hmac_raw, &hmac_len);
-    
-    if (hmac_len != EKM_LENGTH)
+    cursor = ngx_hex_dump(cursor, ekm_raw, sizeof(ekm_raw));
+    *cursor++ = ':';
+    if (report_data_v2)
     {
-        ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
-                      "ekm: unexpected HMAC length %u", hmac_len);
-        return NGX_OK;
+        cursor = ngx_hex_dump(cursor, cert_sha256, sizeof(cert_sha256));
+        *cursor++ = ':';
     }
-
-    /* Convert HMAC to hex */
-    for (size_t i = 0; i < hmac_len; i++)
-    {
-        output[65 + i * 2] = hex_chars[(hmac_raw[i] >> 4) & 0x0f];
-        output[65 + i * 2 + 1] = hex_chars[hmac_raw[i] & 0x0f];
-    }
+    ngx_hex_dump(cursor, hmac_raw, sizeof(hmac_raw));
 
     /* Set variable value */
     v->len = output_len;

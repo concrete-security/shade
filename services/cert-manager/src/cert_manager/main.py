@@ -47,6 +47,7 @@ if __name__ == "__main__":
         force_rm_cert_files=force_rm_cert_files,
         fqdn_resolve_wait_seconds=fqdn_resolve_wait_seconds,
         fqdn_resolve_max_tries=fqdn_resolve_max_tries,
+        certificate_binding=os.getenv("SHADE_CERTIFICATE_BINDING", "rtmr3-event"),
     )
     try:
         manager.run()

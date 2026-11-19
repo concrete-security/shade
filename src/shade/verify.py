@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-from shade.config import ShadeConfig
+from shade.config import CERTIFICATE_BINDING_ENV, ShadeConfig
 from shade.versions import get_images
 
 _ENV_VAR_PATTERN = re.compile(r"(?<!\$)\$\{([A-Z_][A-Z0-9_]*)\}")
@@ -175,7 +175,7 @@ def extract_env_var_names(compose_data: dict) -> set[str]:
             for item in env:
                 if "=" in str(item):
                     env_vars.add(str(item).split("=", 1)[0])
-    return env_vars
+    return env_vars - {CERTIFICATE_BINDING_ENV}
 
 
 def check_allowed_envs(output_path: Path) -> list[CheckResult]:

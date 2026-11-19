@@ -24,8 +24,9 @@ if [ "${DEV_MODE}" = "true" ]; then
 else
   echo "Deriving EKM HMAC key from TEE (dstack)..."
   EKM_SHARED_SECRET=$(uv run python3 -c "
+import os
 from dstack_sdk import DstackClient
-c = DstackClient()
+c = DstackClient('/var/run/dstack.sock' if os.getenv('SHADE_CERTIFICATE_BINDING') == 'report-data-v2' else None)
 print(c.get_key('ekm/hmac-key/v1').decode_key().hex())
 ")
   export EKM_SHARED_SECRET
