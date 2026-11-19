@@ -99,7 +99,9 @@ class CertificateManager:
                 return b"\x01" * 32
 
             # Initialize dstack client
-            endpoint = "/var/run/dstack.sock" if self.certificate_binding == "report-data-v2" else None
+            endpoint = (
+                "/var/run/dstack.sock" if self.certificate_binding == "report-data-v2" else None
+            )
             dstack_client = DstackClient(endpoint)
             logger.info("dstack SDK initialized successfully")
             # Use dstack SDK to get deterministic 32-byte key material
